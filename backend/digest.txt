@@ -1,0 +1,1482 @@
+Directory structure:
+└── backend/
+    ├── README.md
+    ├── config.py
+    ├── data_loader.py
+    ├── feedback.py
+    ├── main.py
+    ├── models.py
+    ├── requirements.txt
+    ├── algorithms/
+    │   ├── astar_solver.py
+    │   ├── base.py
+    │   ├── csp_solver.py
+    │   ├── ga_solver.py
+    │   └── simulated_annealing.py
+    └── heuristics/
+        └── csp_heuristics.py
+
+================================================
+FILE: README.md
+================================================
+Error reading file with 'cp1252': 'charmap' codec can't decode byte 0x81 in position 1414: character maps to <undefined>
+
+
+================================================
+FILE: config.py
+================================================
+# ============================================================
+# FILE: config.py
+# Configuration and Constants
+# ============================================================
+
+AVAILABLE_ATTRIBUTES = [
+    'Generation', 'Height', 'Weight', 
+    'Type1', 'Type2', 'Color', 'evolutionary_stage'
+]
+
+NUMERIC_ATTRIBUTES = ['Height', 'Weight']
+
+AVAILABLE_ALGORITHMS = ['CSP', 'GA', 'ASTAR', 'SA']
+
+AVAILABLE_HEURISTICS = [
+    'random',           # Random selection
+    'mrv',              # Minimum Remaining Values
+    'lcv',              # Least Constraining Value
+    'entropy',          # Maximum Information Gain
+    'degree',           # Degree heuristic
+    'mac',              # Maintaining Arc Consistency
+    'forward_checking', # Forward checking
+    'domain_wipeout',   # Domain wipeout prevention
+]
+
+AVAILABLE_CROSSOVER_STRATEGIES = [
+    'attribute_blend',
+    'uniform',
+    'single_point',
+    'two_point',
+    'fitness_weighted',
+    'adaptive'
+]
+
+HEURISTIC_DESCRIPTIONS = {
+    "random": "Random selection from remaining candidates",
+    "mrv": "Minimum Remaining Values - choose most constrained attribute",
+    "lcv": "Least Constraining Value - minimize future constraint",
+    "entropy": "Maximum information gain - highest uncertainty reduction",
+    "degree": "Choose variable involved in most constraints",
+    "mac": "Maintaining Arc Consistency - propagate constraints",
+    "forward_checking": "Check future variable domains after assignment",
+    "domain_wipeout": "Avoid assignments that cause domain wipeout"
+}
+
+ALGORITHM_DESCRIPTIONS = {
+    "CSP": "Constraint Satisfaction Problem solver with various heuristics",
+    "GA": "Genetic Algorithm with population-based evolution",
+    "ASTAR": "A* Search algorithm with admissible heuristics",
+    "SA": "Simulated Annealing with temperature-based optimization"
+}
+
+# GA Configuration
+DEFAULT_GA_CONFIG = {
+    'pop_size': 100,
+    'elite_size': 20,
+    'mutation_rate': 0.15,
+    'crossover_rate': 0.8,
+    'tournament_size': 7,
+    'crossover_strategy': 'attribute_blend',
+    'generations_per_guess': 30
+}
+
+# SA Configuration
+DEFAULT_SA_CONFIG = {
+    'initial_temp': 100.0,
+    'cooling_rate': 0.95,
+    'min_temp': 0.01,
+    'iterations_per_temp': 50,
+    'reheat_threshold': 0.1
+}
+
+# A* Configuration
+DEFAULT_ASTAR_CONFIG = {
+    'max_open_set': 1000,
+    'beam_width': 100,
+    'heuristic_weight': 1.0
+}
+
+
+
+
+================================================
+FILE: data_loader.py
+================================================
+# ============================================================
+# FILE: data_loader.py
+# Dataset Loading and Preprocessing
+# ============================================================
+
+import pandas as pd
+from typing import Optional
+
+class DataLoader:
+    _instance = None
+    _df = None
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(DataLoader, cls).__new__(cls)
+        return cls._instance
+    
+    def load_data(self, filepath: str = "03_cleaned_with_images_and_evolutionary_stages.csv"):
+        """Load Pokemon dataset"""
+        if self._df is None:
+            self._df = pd.read_csv(filepath)
+            self._preprocess()
+        return self._df
+    
+    def _preprocess(self):
+        """Preprocess data"""
+        # Convert numeric columns
+        numeric_cols = ['Height', 'Weight', 'Generation']
+        for col in numeric_cols:
+            if col in self._df.columns:
+                self._df[col] = pd.to_numeric(self._df[col], errors='coerce')
+        
+        # Handle missing values
+        self._df['Type2'] = self._df['Type2'].fillna('None')
+        
+    def get_pokemon_by_name(self, name: str) -> Optional[pd.Series]:
+        """Get Pokemon by name"""
+        matches = self._df[self._df['Original_Name'] == name]
+        return matches.iloc[0] if not matches.empty else None
+    
+    def get_random_pokemon(self) -> pd.Series:
+        """Get random Pokemon"""
+        return self._df.sample(1).iloc[0]
+    
+    def get_dataframe(self) -> pd.DataFrame:
+        """Get full dataframe"""
+        return self._df.copy()
+    
+
+
+
+================================================
+FILE: feedback.py
+================================================
+# ============================================================
+# FILE: feedback.py
+# Feedback Calculation Logic
+# ============================================================
+
+import pandas as pd
+from typing import Dict, List, Set
+
+def clean_types(type_set: Set) -> Set:
+    """Clean type set by removing NaN and None values"""
+    cleaned = {t for t in type_set if t is not None and not (isinstance(t, float) and pd.isna(t))}
+    return cleaned
+
+def get_feedback(secret: pd.Series, guess: pd.Series, 
+                attributes: List[str], numeric_attrs: List[str] = ['Height', 'Weight']) -> Dict[str, str]:
+    """
+    Calculate feedback for a guess compared to secret Pokemon.
+    
+    Returns:
+        Dict with feedback for each attribute:
+        - 'green': Exact match
+        - 'yellow': Type exists but in wrong position
+        - 'gray': Does not match
+        - 'higher': Guess is lower than secret
+        - 'lower': Guess is higher than secret
+    """
+    feedback = {}
+    
+    # Get Pokemon types
+    secret_types = clean_types({secret.get('Type1'), secret.get('Type2')})
+    guess_types = clean_types({guess.get('Type1'), guess.get('Type2')})
+    
+    for attr in attributes:
+        if attr == 'image_url':
+            continue
+        
+        secret_val = secret[attr]
+        guess_val = guess[attr]
+        
+        # Handle Type attributes specially
+        if attr in ['Type1', 'Type2']:
+            if pd.isna(guess_val) and pd.isna(secret_val):
+                feedback[attr] = 'green'
+            elif pd.isna(guess_val) or pd.isna(secret_val):
+                feedback[attr] = 'gray'
+            elif guess_val == secret_val:
+                feedback[attr] = 'green'
+            elif guess_val in secret_types:
+                feedback[attr] = 'yellow'
+            else:
+                feedback[attr] = 'gray'
+        
+        # Handle missing values
+        elif pd.isna(secret_val) or pd.isna(guess_val):
+            feedback[attr] = 'gray'
+        
+        # Exact match
+        elif secret_val == guess_val:
+            feedback[attr] = 'green'
+        
+        # Numeric attributes
+        elif attr in numeric_attrs:
+            if guess_val < secret_val:
+                feedback[attr] = 'higher'
+            else:
+                feedback[attr] = 'lower'
+        
+        # Categorical attributes
+        else:
+            feedback[attr] = 'gray'
+    
+    return feedback
+
+
+
+
+================================================
+FILE: main.py
+================================================
+# ============================================================
+# FILE: main.py
+# Enhanced FastAPI Application
+# ============================================================
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+import time
+
+# Import configurations and models
+from config import *
+from models import *
+from data_loader import DataLoader
+from feedback import get_feedback, is_complete_match
+
+# Import algorithms
+from algorithms.csp_solver import EnhancedPokedleCSP
+from algorithms.ga_solver import EnhancedPokedleGA
+from algorithms.astar_solver import AStarSolver
+from algorithms.simulated_annealing import SimulatedAnnealingSolver
+
+app = FastAPI(
+    title="Enhanced Pokedle Solver API",
+    version="4.0",
+    description="AI-powered Pokedle solver with multiple algorithms and heuristics"
+)
+
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Initialize data loader
+data_loader = DataLoader()
+data_loader.load_data(CSV_PATH)
+
+# ============ Helper Functions ============
+
+def create_solver(config: SolverConfig):
+    """Factory function to create appropriate solver"""
+    df = data_loader.get_dataframe()
+    
+    if config.algorithm == 'CSP':
+        return EnhancedPokedleCSP(df, config.attributes, config.heuristic)
+    
+    elif config.algorithm == 'GA':
+        ga_config = config.ga_config or GAConfig()
+        return EnhancedPokedleGA(df, config.attributes, ga_config.__dict__)
+    
+    elif config.algorithm == 'ASTAR':
+        astar_config = config.astar_config or AStarConfig()
+        return AStarSolver(df, config.attributes, astar_config.__dict__)
+    
+    elif config.algorithm == 'SA':
+        sa_config = config.sa_config or SAConfig()
+        return SimulatedAnnealingSolver(df, config.attributes, sa_config.__dict__)
+    
+    else:
+        raise ValueError(f"Unknown algorithm: {config.algorithm}")
+
+# ============ API Endpoints ============
+
+@app.get("/")
+def root():
+    return {
+        "message": "Enhanced Pokedle Solver API",
+        "version": "4.0",
+        "features": [
+            "Multiple algorithms: CSP, GA, A*, Simulated Annealing",
+            "Enhanced heuristics: MRV, LCV, Entropy, Degree, Forward Checking, Domain Wipeout",
+            "Multiple crossover strategies for GA",
+            "Adaptive temperature control for SA",
+            "Beam search for A*"
+        ]
+    }
+
+@app.get("/health")
+def health_check():
+    return {
+        "status": "healthy",
+        "pokemon_loaded": data_loader.pokemon_count,
+        "timestamp": time.time()
+    }
+
+@app.get("/pokemon")
+def get_pokemon_list():
+    """Get list of all Pokemon"""
+    df = data_loader.get_dataframe()
+    pokemon_list = []
+    
+    for _, row in df.iterrows():
+        pokemon_list.append({
+            "name": row['Original_Name'],
+            "image_url": row.get('image_url', ''),
+            "generation": int(row.get('Generation', 0)) if not pd.isna(row.get('Generation')) else None,
+            "type1": row.get('Type1'),
+            "type2": row.get('Type2')
+        })
+    
+    return {
+        "pokemon": pokemon_list,
+        "count": len(pokemon_list)
+    }
+
+@app.get("/config")
+def get_config():
+    """Get available configuration options"""
+    return {
+        "attributes": AVAILABLE_ATTRIBUTES,
+        "algorithms": AVAILABLE_ALGORITHMS,
+        "algorithm_descriptions": ALGORITHM_DESCRIPTIONS,
+        "heuristics": AVAILABLE_HEURISTICS,
+        "heuristic_descriptions": HEURISTIC_DESCRIPTIONS,
+        "crossover_strategies": AVAILABLE_CROSSOVER_STRATEGIES,
+        "default_configs": {
+            "ga": DEFAULT_GA_CONFIG,
+            "sa": DEFAULT_SA_CONFIG,
+            "astar": DEFAULT_ASTAR_CONFIG
+        }
+    }
+
+@app.get("/algorithms/{algorithm}")
+def get_algorithm_info(algorithm: str):
+    """Get detailed information about a specific algorithm"""
+    if algorithm.upper() not in AVAILABLE_ALGORITHMS:
+        raise HTTPException(404, f"Algorithm {algorithm} not found")
+    
+    algo = algorithm.upper()
+    
+    info = {
+        "name": algo,
+        "description": ALGORITHM_DESCRIPTIONS.get(algo),
+        "compatible_heuristics": [],
+        "config_options": {}
+    }
+    
+    if algo == 'CSP':
+        info["compatible_heuristics"] = AVAILABLE_HEURISTICS
+        info["config_options"] = {"heuristic": "Choose search heuristic"}
+    
+    elif algo == 'GA':
+        info["compatible_heuristics"] = ["fitness-based"]
+        info["config_options"] = DEFAULT_GA_CONFIG
+    
+    elif algo == 'ASTAR':
+        info["compatible_heuristics"] = ["admissible distance-based"]
+        info["config_options"] = DEFAULT_ASTAR_CONFIG
+    
+    elif algo == 'SA':
+        info["compatible_heuristics"] = ["energy-based"]
+        info["config_options"] = DEFAULT_SA_CONFIG
+    
+    return info
+
+@app.post("/solve")
+def solve(config: SolverConfig):
+    """Main solving endpoint"""
+    start_time = time.time()
+    
+    # Validate configuration
+    if config.algorithm not in AVAILABLE_ALGORITHMS:
+        raise HTTPException(400, f"Invalid algorithm. Choose from: {AVAILABLE_ALGORITHMS}")
+    
+    if not all(attr in AVAILABLE_ATTRIBUTES for attr in config.attributes):
+        raise HTTPException(400, f"Invalid attributes. Available: {AVAILABLE_ATTRIBUTES}")
+    
+    if config.heuristic not in AVAILABLE_HEURISTICS:
+        raise HTTPException(400, f"Invalid heuristic. Choose from: {AVAILABLE_HEURISTICS}")
+    
+    # Get secret Pokemon
+    if config.secret_pokemon:
+        secret = data_loader.get_pokemon_by_name(config.secret_pokemon)
+        if secret is None:
+            raise HTTPException(400, f"Pokemon '{config.secret_pokemon}' not found")
+    else:
+        secret = data_loader.get_random_pokemon()
+    
+    # Create solver
+    try:
+        solver = create_solver(config)
+    except Exception as e:
+        raise HTTPException(500, f"Failed to create solver: {str(e)}")
+    
+    # Solving loop
+    steps = []
+    success = False
+    
+    for attempt in range(1, config.max_attempts + 1):
+        # Get next guess
+        try:
+            guess, heuristic_info = solver.next_guess()
+        except Exception as e:
+            raise HTTPException(500, f"Solver error at attempt {attempt}: {str(e)}")
+        
+        if guess is None:
+            break
+        
+        # Calculate feedback
+        feedback = get_feedback(secret, guess, config.attributes, NUMERIC_ATTRIBUTES)
+        
+        # Create step
+        step = SolverStep(
+            attempt=attempt,
+            guess_name=guess['Original_Name'],
+            guess_data={attr: str(guess.get(attr, 'N/A')) for attr in config.attributes},
+            feedback=feedback,
+            remaining_candidates=heuristic_info.get('candidates', 0),
+            timestamp=time.time() - start_time,
+            image_url=guess.get('image_url', ''),
+            heuristic_info=heuristic_info,
+            algorithm_state=solver.get_state_info() if hasattr(solver, 'get_state_info') else None
+        )
+        steps.append(step)
+        
+        # Check if solved
+        if is_complete_match(feedback):
+            success = True
+            break
+        
+        # Update solver with feedback
+        try:
+            solver.update_feedback(guess, feedback)
+        except Exception as e:
+            raise HTTPException(500, f"Failed to update solver: {str(e)}")
+    
+    execution_time = time.time() - start_time
+    
+    # Calculate performance metrics
+    metrics = {
+        "avg_time_per_guess": round(execution_time / len(steps), 3) if steps else 0,
+        "total_guesses": len(steps),
+        "success_rate": 1.0 if success else 0.0,
+        "efficiency": round(1.0 / len(steps), 3) if steps else 0
+    }
+    
+    return SolverResult(
+        secret_name=secret['Original_Name'],
+        secret_image=secret.get('image_url', ''),
+        success=success,
+        total_attempts=len(steps),
+        steps=steps,
+        execution_time=round(execution_time, 3),
+        algorithm=config.algorithm,
+        heuristic=config.heuristic,
+        performance_metrics=metrics
+    )
+
+@app.post("/compare")
+def compare_algorithms(
+    algorithms: List[str],
+    attributes: List[str],
+    secret_pokemon: Optional[str] = None,
+    max_attempts: int = 10
+):
+    """Compare multiple algorithms on the same Pokemon"""
+    
+    results = {}
+    
+    # Get secret Pokemon once
+    if secret_pokemon:
+        secret = data_loader.get_pokemon_by_name(secret_pokemon)
+        if secret is None:
+            raise HTTPException(400, f"Pokemon '{secret_pokemon}' not found")
+    else:
+        secret = data_loader.get_random_pokemon()
+    
+    secret_name = secret['Original_Name']
+    
+    for algo in algorithms:
+        if algo not in AVAILABLE_ALGORITHMS:
+            continue
+        
+        # Create config for this algorithm
+        config = SolverConfig(
+            algorithm=algo,
+            attributes=attributes,
+            secret_pokemon=secret_name,
+            max_attempts=max_attempts,
+            heuristic='entropy' if algo == 'CSP' else 'random'
+        )
+        
+        try:
+            result = solve(config)
+            results[algo] = {
+                "success": result.success,
+                "attempts": result.total_attempts,
+                "time": result.execution_time,
+                "metrics": result.performance_metrics
+            }
+        except Exception as e:
+            results[algo] = {"error": str(e)}
+    
+    return {
+        "secret_pokemon": secret_name,
+        "results": results,
+        "winner": min(
+            [(k, v) for k, v in results.items() if "error" not in v],
+            key=lambda x: x[1]["attempts"]
+        )[0] if results else None
+    }
+
+
+================================================
+FILE: models.py
+================================================
+# ============================================================
+# FILE: models.py
+# Pydantic Models
+# ============================================================
+
+from pydantic import BaseModel, Field
+from typing import List, Optional, Dict
+
+class GAConfig(BaseModel):
+    pop_size: int = Field(default=100, ge=10, le=500)
+    elite_size: int = Field(default=20, ge=5, le=100)
+    mutation_rate: float = Field(default=0.15, ge=0.0, le=1.0)
+    crossover_rate: float = Field(default=0.8, ge=0.0, le=1.0)
+    tournament_size: int = Field(default=7, ge=2, le=20)
+    crossover_strategy: str = 'attribute_blend'
+    generations_per_guess: int = Field(default=30, ge=1, le=200)
+
+class SAConfig(BaseModel):
+    initial_temp: float = Field(default=100.0, gt=0)
+    cooling_rate: float = Field(default=0.95, gt=0, lt=1)
+    min_temp: float = Field(default=0.01, gt=0)
+    iterations_per_temp: int = Field(default=50, ge=1)
+    reheat_threshold: float = Field(default=0.1, ge=0, le=1)
+
+class AStarConfig(BaseModel):
+    max_open_set: int = Field(default=1000, ge=10)
+    beam_width: int = Field(default=100, ge=1)
+    heuristic_weight: float = Field(default=1.0, ge=0)
+
+class SolverConfig(BaseModel):
+    algorithm: str
+    attributes: List[str]
+    heuristic: str = 'random'
+    secret_pokemon: Optional[str] = None
+    max_attempts: int = Field(default=10, ge=1, le=50)
+    ga_config: Optional[GAConfig] = None
+    sa_config: Optional[SAConfig] = None
+    astar_config: Optional[AStarConfig] = None
+
+class SolverStep(BaseModel):
+    attempt: int
+    guess_name: str
+    guess_data: Dict
+    feedback: Dict
+    remaining_candidates: int
+    timestamp: float
+    image_url: Optional[str] = None
+    heuristic_info: Optional[Dict] = None
+    algorithm_state: Optional[Dict] = None
+
+
+
+
+================================================
+FILE: requirements.txt
+================================================
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pandas==2.1.3
+pydantic==2.5.0
+python-multipart==0.0.6
+numpy==1.26.2
+
+
+================================================
+FILE: algorithms/astar_solver.py
+================================================
+# ============================================================
+# FILE: algorithms/astar_solver.py
+# A* Search Algorithm Implementation
+# ============================================================
+
+import pandas as pd
+import heapq
+import math
+from typing import Dict, List, Tuple, Any
+from algorithms.base import BaseSolver
+
+class Node:
+    """Node for A* search tree"""
+    def __init__(self, pokemon_idx: int, g_cost: float, h_cost: float, parent=None):
+        self.pokemon_idx = pokemon_idx
+        self.g_cost = g_cost  # Cost from start
+        self.h_cost = h_cost  # Heuristic cost to goal
+        self.f_cost = g_cost + h_cost  # Total cost
+        self.parent = parent
+    
+    def __lt__(self, other):
+        return self.f_cost < other.f_cost
+
+class AStarSolver(BaseSolver):
+    """
+    A* Search algorithm for Pokedle.
+    Uses admissible heuristics to guide search.
+    """
+    
+    def __init__(self, dataframe: pd.DataFrame, attributes: list, config: dict):
+        super().__init__(dataframe, attributes)
+        self.max_open_set = config.get('max_open_set', 1000)
+        self.beam_width = config.get('beam_width', 100)
+        self.heuristic_weight = config.get('heuristic_weight', 1.0)
+        self.open_set = []
+        self.closed_set = set()
+        self.candidates = set(dataframe.index)
+        self.constraints = {attr: [] for attr in attributes}
+        
+    def heuristic_distance(self, pokemon_idx: int) -> float:
+        """
+        Admissible heuristic: estimate minimum remaining guesses.
+        Based on constraint violations and attribute diversity.
+        """
+        pokemon = self.df.loc[pokemon_idx]
+        
+        # If no feedback yet, use diversity-based heuristic
+        if not self.feedback_history:
+            return self._diversity_heuristic(pokemon)
+        
+        # Calculate constraint satisfaction score
+        violations = 0
+        satisfied = 0
+        
+        for guess_idx, feedback in self.feedback_history:
+            guess = self.df.loc[guess_idx]
+            
+            for attr, status in feedback.items():
+                if attr == 'image_url':
+                    continue
+                
+                if status == 'green':
+                    if pokemon[attr] != guess[attr]:
+                        violations += 2
+                    else:
+                        satisfied += 1
+                
+                elif status == 'gray':
+                    if attr in ['Type1', 'Type2']:
+                        pokemon_types = {pokemon['Type1'], pokemon['Type2']}
+                        if guess[attr] in pokemon_types:
+                            violations += 1
+                    elif pokemon[attr] == guess[attr]:
+                        violations += 1
+                
+                elif status == 'yellow':
+                    pokemon_types = {pokemon['Type1'], pokemon['Type2']}
+                    if guess[attr] not in pokemon_types:
+                        violations += 1
+                
+                elif status == 'higher':
+                    if pokemon[attr] <= guess[attr]:
+                        violations += 1
+                
+                elif status == 'lower':
+                    if pokemon[attr] >= guess[attr]:
+                        violations += 1
+        
+        # Heuristic: violations / (satisfied + 1) gives estimate of remaining distance
+        if satisfied == len(self.attributes) * len(self.feedback_history):
+            return 0  # Perfect match
+        
+        return violations / (satisfied + 1)
+    
+    def _diversity_heuristic(self, pokemon: pd.Series) -> float:
+        """Heuristic based on attribute diversity in remaining candidates"""
+        score = 0
+        
+        for attr in self.attributes:
+            if attr == 'image_url':
+                continue
+            
+            value = pokemon[attr]
+            if pd.isna(value):
+                score += 0.5
+                continue
+            
+            # Count how many candidates share this value
+            matching = (self.df.loc[list(self.candidates)][attr] == value).sum()
+            total = len(self.candidates)
+            
+            # Prefer values that split candidates evenly
+            ratio = matching / total if total > 0 else 0
+            score += abs(0.5 - ratio)
+        
+        return score
+    
+    def next_guess(self) -> Tuple[pd.Series, Dict[str, Any]]:
+        """Generate next guess using A* search"""
+        
+        # Initialize open set on first call
+        if not self.open_set and not self.closed_set:
+            # Start with diverse initial candidates
+            initial_candidates = self._select_initial_candidates()
+            for idx in initial_candidates:
+                h_cost = self.heuristic_distance(idx) * self.heuristic_weight
+                node = Node(idx, 0, h_cost)
+                heapq.heappush(self.open_set, node)
+        
+        # Beam search: keep only top candidates
+        if len(self.open_set) > self.beam_width:
+            self.open_set = heapq.nsmallest(self.beam_width, self.open_set)
+            heapq.heapify(self.open_set)
+        
+        # Get best candidate
+        if not self.open_set:
+            # Fallback: random from candidates
+            if self.candidates:
+                idx = list(self.candidates)[0]
+                return self.df.loc[idx], {"algorithm": "astar", "fallback": True}
+            return None, {}
+        
+        current_node = heapq.heappop(self.open_set)
+        self.closed_set.add(current_node.pokemon_idx)
+        
+        pokemon = self.df.loc[current_node.pokemon_idx]
+        
+        info = {
+            "algorithm": "astar",
+            "g_cost": round(current_node.g_cost, 3),
+            "h_cost": round(current_node.h_cost, 3),
+            "f_cost": round(current_node.f_cost, 3),
+            "open_set_size": len(self.open_set),
+            "closed_set_size": len(self.closed_set),
+            "candidates": len(self.candidates)
+        }
+        
+        return pokemon, info
+    
+    def _select_initial_candidates(self, n: int = 50) -> List[int]:
+        """Select diverse initial candidates"""
+        if len(self.candidates) <= n:
+            return list(self.candidates)
+        
+        # Sample from different clusters
+        sample = self.df.loc[list(self.candidates)].sample(min(n, len(self.candidates)))
+        return sample.index.tolist()
+    
+    def update_feedback(self, guess: pd.Series, feedback: Dict[str, str]):
+        """Update search state with new feedback"""
+        guess_idx = guess.name
+        self.add_feedback(guess_idx, feedback)
+        
+        # Update constraints and filter candidates
+        self._update_constraints(guess, feedback)
+        self._filter_candidates()
+        
+        # Rebuild open set with updated heuristics
+        self._rebuild_open_set()
+    
+    def _update_constraints(self, guess: pd.Series, feedback: Dict[str, str]):
+        """Update constraints based on feedback"""
+        for attr, status in feedback.items():
+            if attr == 'image_url':
+                continue
+            
+            value = guess[attr]
+            
+            if status == 'green':
+                self.constraints[attr].append(('==', value))
+            elif status in ['gray', 'yellow']:
+                self.constraints[attr].append(('!=', value))
+            elif status == 'higher':
+                self.constraints[attr].append(('>', value))
+            elif status == 'lower':
+                self.constraints[attr].append(('<', value))
+    
+    def _filter_candidates(self):
+        """Filter candidates based on constraints"""
+        valid_candidates = set()
+        
+        for idx in self.candidates:
+            pokemon = self.df.loc[idx]
+            valid = True
+            
+            for attr, constraints in self.constraints.items():
+                if attr == 'image_url':
+                    continue
+                
+                for op, val in constraints:
+                    if pd.isna(val):
+                        continue
+                    
+                    if op == '==' and pokemon[attr] != val:
+                        valid = False
+                        break
+                    elif op == '!=' and pokemon[attr] == val:
+                        valid = False
+                        break
+                    elif op == '>' and not pokemon[attr] > val:
+                        valid = False
+                        break
+                    elif op == '<' and not pokemon[attr] < val:
+                        valid = False
+                        break
+                
+                if not valid:
+                    break
+            
+            if valid:
+                valid_candidates.add(idx)
+        
+        self.candidates = valid_candidates
+    
+    def _rebuild_open_set(self):
+        """Rebuild open set with updated heuristics"""
+        new_open_set = []
+        
+        # Re-evaluate nodes still in open set
+        for node in self.open_set:
+            if node.pokemon_idx in self.candidates:
+                h_cost = self.heuristic_distance(node.pokemon_idx) * self.heuristic_weight
+                new_node = Node(node.pokemon_idx, node.g_cost + 1, h_cost, node.parent)
+                heapq.heappush(new_open_set, new_node)
+        
+        # Add new promising candidates
+        for idx in self.candidates:
+            if idx not in self.closed_set and idx not in [n.pokemon_idx for n in new_open_set]:
+                h_cost = self.heuristic_distance(idx) * self.heuristic_weight
+                node = Node(idx, len(self.feedback_history), h_cost)
+                heapq.heappush(new_open_set, node)
+        
+        self.open_set = new_open_set
+    
+
+
+
+================================================
+FILE: algorithms/base.py
+================================================
+# ============================================================
+# FILE: algorithms/base.py
+# Abstract Base Solver Class
+# ============================================================
+
+from abc import ABC, abstractmethod
+import pandas as pd
+from typing import Dict, Tuple, Any
+
+class BaseSolver(ABC):
+    """Abstract base class for all solving algorithms"""
+    
+    def __init__(self, dataframe: pd.DataFrame, attributes: list):
+        self.df = dataframe.copy()
+        self.attributes = attributes
+        self.feedback_history = []
+    
+    @abstractmethod
+    def next_guess(self) -> Tuple[pd.Series, Dict[str, Any]]:
+        """
+        Generate next guess.
+        
+        Returns:
+            Tuple of (pokemon_series, info_dict)
+        """
+        pass
+    
+    @abstractmethod
+    def update_feedback(self, guess: pd.Series, feedback: Dict[str, str]):
+        """Update solver state with feedback from guess"""
+        pass
+    
+    @abstractmethod
+    def get_state_info(self) -> Dict[str, Any]:
+        """Get current state information for debugging/display"""
+        pass
+    
+
+
+
+================================================
+FILE: algorithms/csp_solver.py
+================================================
+[Empty file]
+
+
+================================================
+FILE: algorithms/ga_solver.py
+================================================
+[Empty file]
+
+
+================================================
+FILE: algorithms/simulated_annealing.py
+================================================
+# ============================================================
+# FILE: algorithms/simulated_annealing.py
+# Simulated Annealing Algorithm Implementation
+# ============================================================
+
+import pandas as pd
+import random
+import math
+from typing import Dict, Tuple, Any
+from algorithms.base import BaseSolver
+
+class SimulatedAnnealingSolver(BaseSolver):
+    """
+    Simulated Annealing algorithm for Pokedle.
+    Uses temperature-based acceptance probability to escape local optima.
+    """
+    
+    def __init__(self, dataframe: pd.DataFrame, attributes: list, config: dict):
+        super().__init__(dataframe, attributes)
+        self.initial_temp = config.get('initial_temp', 100.0)
+        self.cooling_rate = config.get('cooling_rate', 0.95)
+        self.min_temp = config.get('min_temp', 0.01)
+        self.iterations_per_temp = config.get('iterations_per_temp', 50)
+        self.reheat_threshold = config.get('reheat_threshold', 0.1)
+        
+        self.current_temp = self.initial_temp
+        self.current_solution = None
+        self.best_solution = None
+        self.best_energy = float('inf')
+        self.iteration = 0
+        self.no_improvement_count = 0
+        
+    def energy(self, pokemon_idx: int) -> float:
+        """
+        Calculate energy (lower is better).
+        Based on constraint violations from feedback history.
+        """
+        pokemon = self.df.loc[pokemon_idx]
+        
+        if not self.feedback_history:
+            # Initial energy based on attribute diversity
+            return self._diversity_energy(pokemon)
+        
+        violations = 0
+        satisfied = 0
+        penalty_multiplier = 1.0
+        
+        for guess_idx, feedback in self.feedback_history:
+            guess = self.df.loc[guess_idx]
+            
+            for attr, status in feedback.items():
+                if attr == 'image_url':
+                    continue
+                
+                if status == 'green':
+                    if pokemon[attr] == guess[attr]:
+                        satisfied += 1
+                    else:
+                        violations += 3 * penalty_multiplier
+                        penalty_multiplier *= 1.1
+                
+                elif status == 'gray':
+                    if attr in ['Type1', 'Type2']:
+                        pokemon_types = {pokemon['Type1'], pokemon['Type2']}
+                        pokemon_types = {t for t in pokemon_types if not pd.isna(t)}
+                        if guess[attr] in pokemon_types:
+                            violations += 2
+                    else:
+                        if pokemon[attr] == guess[attr]:
+                            violations += 2
+                
+                elif status == 'yellow':
+                    pokemon_types = {pokemon['Type1'], pokemon['Type2']}
+                    pokemon_types = {t for t in pokemon_types if not pd.isna(t)}
+                    if guess[attr] not in pokemon_types:
+                        violations += 2
+                    elif pokemon[attr] == guess[attr]:
+                        violations += 1
+                
+                elif status == 'higher':
+                    if pokemon[attr] <= guess[attr]:
+                        violations += 2
+                
+                elif status == 'lower':
+                    if pokemon[attr] >= guess[attr]:
+                        violations += 2
+        
+        # Lower energy for more satisfied constraints
+        base_energy = violations - satisfied
+        
+        # Add diversity bonus to avoid getting stuck
+        diversity_penalty = self._diversity_energy(pokemon) * 0.1
+        
+        return max(0, base_energy + diversity_penalty)
+    
+    def _diversity_energy(self, pokemon: pd.Series) -> float:
+        """Energy based on how common the attributes are"""
+        energy = 0
+        
+        for attr in self.attributes:
+            if attr == 'image_url':
+                continue
+            
+            value = pokemon[attr]
+            if pd.isna(value):
+                energy += 0.5
+                continue
+            
+            # Penalize very common values
+            count = (self.df[attr] == value).sum()
+            ratio = count / len(self.df)
+            energy += ratio
+        
+        return energy
+    
+    def acceptance_probability(self, current_energy: float, new_energy: float) -> float:
+        """Calculate probability of accepting worse solution"""
+        if new_energy < current_energy:
+            return 1.0
+        
+        if self.current_temp == 0:
+            return 0.0
+        
+        delta = new_energy - current_energy
+        return math.exp(-delta / self.current_temp)
+    
+    def get_neighbor(self, pokemon_idx: int) -> int:
+        """
+        Generate neighbor solution.
+        Prefer solutions similar to current but with variation.
+        """
+        current_pokemon = self.df.loc[pokemon_idx]
+        
+        # High temperature: explore more randomly
+        # Low temperature: exploit local neighborhood
+        if self.current_temp > self.initial_temp * 0.5:
+            # Exploration: random pokemon
+            return self.df.sample(1).index[0]
+        else:
+            # Exploitation: similar pokemon
+            # Find pokemon with similar attributes
+            candidates = self.df.copy()
+            similarity_scores = []
+            
+            sample_size = min(100, len(self.df))
+            sample = self.df.sample(sample_size)
+            
+            for idx, row in sample.iterrows():
+                similarity = 0
+                for attr in self.attributes:
+                    if attr == 'image_url':
+                        continue
+                    if not pd.isna(row[attr]) and not pd.isna(current_pokemon[attr]):
+                        if row[attr] == current_pokemon[attr]:
+                            similarity += 1
+                        elif attr in ['Height', 'Weight']:
+                            diff = abs(row[attr] - current_pokemon[attr])
+                            max_diff = self.df[attr].max() - self.df[attr].min()
+                            if max_diff > 0:
+                                similarity += 1 - (diff / max_diff)
+                
+                similarity_scores.append((idx, similarity))
+            
+            # Select with probability proportional to similarity
+            similarity_scores.sort(key=lambda x: x[1], reverse=True)
+            top_candidates = similarity_scores[:20]
+            
+            if top_candidates:
+                weights = [s for _, s in top_candidates]
+                total_weight = sum(weights) + 0.01
+                probs = [w / total_weight for w in weights]
+                selected = random.choices([idx for idx, _ in top_candidates], weights=probs)[0]
+                return selected
+            
+            return self.df.sample(1).index[0]
+    
+    def next_guess(self) -> Tuple[pd.Series, Dict[str, Any]]:
+        """Generate next guess using simulated annealing"""
+        
+        # Initialize current solution
+        if self.current_solution is None:
+            self.current_solution = self.df.sample(1).index[0]
+            self.best_solution = self.current_solution
+            self.best_energy = self.energy(self.current_solution)
+        
+        # Run iterations at current temperature
+        for _ in range(self.iterations_per_temp):
+            # Get neighbor
+            neighbor = self.get_neighbor(self.current_solution)
+            
+            # Calculate energies
+            current_energy = self.energy(self.current_solution)
+            neighbor_energy = self.energy(neighbor)
+            
+            # Accept or reject
+            if random.random() < self.acceptance_probability(current_energy, neighbor_energy):
+                self.current_solution = neighbor
+                
+                # Update best solution
+                if neighbor_energy < self.best_energy:
+                    self.best_solution = neighbor
+                    self.best_energy = neighbor_energy
+                    self.no_improvement_count = 0
+                else:
+                    self.no_improvement_count += 1
+            
+            self.iteration += 1
+        
+        # Cool down
+        self.current_temp *= self.cooling_rate
+        
+        # Reheat if stuck
+        if self.no_improvement_count > 100:
+            self.current_temp = self.initial_temp * self.reheat_threshold
+            self.no_improvement_count = 0
+        
+        # Ensure minimum temperature
+        if self.current_temp < self.min_temp:
+            self.current_temp = self.min_temp
+        
+        pokemon = self.df.loc[self.best_solution]
+        
+        info = {
+            "algorithm": "simulated_annealing",
+            "temperature": round(self.current_temp, 3),
+            "current_energy": round(self.energy(self.current_solution), 3),
+            "best_energy": round(self.best_energy, 3),
+            "iteration": self.iteration,
+            "no_improvement": self.no_improvement_count
+        }
+        
+        return pokemon, info
+    
+    def update_feedback(self, guess: pd.Series, feedback: Dict[str, str]):
+        """Update solver with new feedback"""
+        guess_idx = guess.name
+        self.add_feedback(guess_idx, feedback)
+        
+        # Recalculate energy for current and best solutions
+        current_energy = self.energy(self.current_solution)
+        best_energy = self.energy(self.best_solution)
+        
+        # Reset if feedback changes energy landscape significantly
+        if abs(current_energy - self.best_energy) > 10:
+            self.current_temp = self.initial_temp * 0.5
+            self.no_improvement_count = 0
+
+
+
+================================================
+FILE: heuristics/csp_heuristics.py
+================================================
+# ============================================================
+# FILE: heuristics/csp_heuristics.py
+# Enhanced CSP Heuristics
+# ============================================================
+
+import pandas as pd
+import math
+from typing import Tuple, Dict, Any
+
+class CSPHeuristics:
+    """Collection of heuristics for CSP solving"""
+    
+    @staticmethod
+    def random(candidates: pd.DataFrame, attributes: list) -> Tuple[pd.Series, Dict]:
+        """Random selection"""
+        if len(candidates) == 0:
+            return None, {}
+        return candidates.sample(1).iloc[0], {
+            "heuristic": "random",
+            "candidates": len(candidates)
+        }
+    
+    @staticmethod
+    def mrv(candidates: pd.DataFrame, attributes: list) -> Tuple[pd.Series, Dict]:
+        """
+        Minimum Remaining Values:
+        Choose variable with fewest remaining values in domain.
+        """
+        if len(candidates) == 0:
+            return None, {}
+        if len(candidates) == 1:
+            return candidates.iloc[0], {"heuristic": "mrv", "candidates": 1}
+        
+        min_values = float('inf')
+        best_attr = None
+        
+        for attr in attributes:
+            if attr == 'image_url':
+                continue
+            unique_count = candidates[attr].nunique()
+            if unique_count < min_values and unique_count > 0:
+                min_values = unique_count
+                best_attr = attr
+        
+        if best_attr:
+            most_common_value = candidates[best_attr].mode()[0]
+            subset = candidates[candidates[best_attr] == most_common_value]
+            guess = subset.sample(1).iloc[0]
+            return guess, {
+                "heuristic": "mrv",
+                "attr": best_attr,
+                "unique_values": min_values,
+                "value": str(most_common_value),
+                "candidates": len(candidates)
+            }
+        
+        return candidates.sample(1).iloc[0], {"heuristic": "mrv", "candidates": len(candidates)}
+    
+    @staticmethod
+    def lcv(candidates: pd.DataFrame, attributes: list) -> Tuple[pd.Series, Dict]:
+        """
+        Least Constraining Value:
+        Choose value that rules out fewest values for remaining variables.
+        """
+        if len(candidates) == 0:
+            return None, {}
+        if len(candidates) == 1:
+            return candidates.iloc[0], {"heuristic": "lcv", "candidates": 1}
+        
+        best_pokemon = None
+        min_avg_elimination = float('inf')
+        
+        sample_size = min(30, len(candidates))
+        sample = candidates.sample(sample_size)
+        
+        for _, pokemon in sample.iterrows():
+            total_elimination = 0
+            
+            for attr in attributes:
+                if attr == 'image_url':
+                    continue
+                value = pokemon[attr]
+                if not pd.isna(value):
+                    matching = (candidates[attr] == value).sum()
+                    elimination = len(candidates) - matching
+                    total_elimination += elimination
+            
+            avg_elimination = total_elimination / len(attributes)
+            
+            if avg_elimination < min_avg_elimination:
+                min_avg_elimination = avg_elimination
+                best_pokemon = pokemon
+        
+        return best_pokemon, {
+            "heuristic": "lcv",
+            "avg_elimination": round(min_avg_elimination, 2),
+            "candidates": len(candidates)
+        }
+    
+    @staticmethod
+    def entropy(candidates: pd.DataFrame, attributes: list) -> Tuple[pd.Series, Dict]:
+        """
+        Maximum Entropy:
+        Choose attribute with highest information entropy.
+        """
+        if len(candidates) == 0:
+            return None, {}
+        if len(candidates) == 1:
+            return candidates.iloc[0], {"heuristic": "entropy", "candidates": 1}
+        
+        max_entropy = -1
+        best_attr = None
+        
+        for attr in attributes:
+            if attr == 'image_url':
+                continue
+            
+            value_counts = candidates[attr].value_counts()
+            total = len(candidates)
+            entropy = 0
+            
+            for count in value_counts:
+                p = count / total
+                if p > 0:
+                    entropy -= p * math.log2(p)
+            
+            if entropy > max_entropy:
+                max_entropy = entropy
+                best_attr = attr
+        
+        if best_attr:
+            numeric_attrs = ['Height', 'Weight']
+            if best_attr in numeric_attrs:
+                median_value = candidates[best_attr].median()
+                distances = (candidates[best_attr] - median_value).abs()
+                closest_idx = distances.idxmin()
+                guess = candidates.loc[closest_idx]
+            else:
+                most_common = candidates[best_attr].mode()[0]
+                subset = candidates[candidates[best_attr] == most_common]
+                guess = subset.sample(1).iloc[0]
+            
+            return guess, {
+                "heuristic": "entropy",
+                "attr": best_attr,
+                "entropy": round(max_entropy, 3),
+                "candidates": len(candidates)
+            }
+        
+        return candidates.sample(1).iloc[0], {"heuristic": "entropy", "candidates": len(candidates)}
+    
+    @staticmethod
+    def degree(candidates: pd.DataFrame, attributes: list, constraints: dict) -> Tuple[pd.Series, Dict]:
+        """
+        Degree Heuristic:
+        Choose variable involved in most constraints.
+        """
+        if len(candidates) == 0:
+            return None, {}
+        if len(candidates) == 1:
+            return candidates.iloc[0], {"heuristic": "degree", "candidates": 1}
+        
+        # Count constraints per attribute
+        constraint_counts = {attr: len(cons) for attr, cons in constraints.items()}
+        
+        # Find attribute with most constraints
+        if constraint_counts:
+            best_attr = max(constraint_counts, key=constraint_counts.get)
+            max_constraints = constraint_counts[best_attr]
+            
+            if max_constraints > 0:
+                # Select pokemon that best satisfies this attribute
+                most_common = candidates[best_attr].mode()[0]
+                subset = candidates[candidates[best_attr] == most_common]
+                guess = subset.sample(1).iloc[0]
+                
+                return guess, {
+                    "heuristic": "degree",
+                    "attr": best_attr,
+                    "constraints": max_constraints,
+                    "candidates": len(candidates)
+                }
+        
+        return candidates.sample(1).iloc[0], {"heuristic": "degree", "candidates": len(candidates)}
+    
+    @staticmethod
+    def forward_checking(candidates: pd.DataFrame, attributes: list, constraints: dict) -> Tuple[pd.Series, Dict]:
+        """
+        Forward Checking:
+        Look ahead to see which choice leaves most options.
+        """
+        if len(candidates) == 0:
+            return None, {}
+        if len(candidates) == 1:
+            return candidates.iloc[0], {"heuristic": "forward_checking", "candidates": 1}
+        
+        best_pokemon = None
+        max_remaining = -1
+        
+        sample_size = min(20, len(candidates))
+        sample = candidates.sample(sample_size)
+        
+        for _, pokemon in sample.iterrows():
+            # Simulate choosing this pokemon
+            # Count how many candidates would remain feasible
+            remaining = 0
+            
+            for _, candidate in candidates.iterrows():
+                feasible = True
+                
+                for attr in attributes:
+                    if attr == 'image_url':
+                        continue
+                    
+                    # Check if candidate could still be valid
+                    if pokemon[attr] != candidate[attr]:
+                        # Would create new constraint
+                        # Check if candidate satisfies existing constraints
+                        for op, val in constraints.get(attr, []):
+                            if op == '==' and candidate[attr] != val:
+                                feasible = False
+                                break
+                            elif op == '!=' and candidate[attr] == val:
+                                feasible = False
+                                break
+                    
+                    if not feasible:
+                        break
+                
+                if feasible:
+                    remaining += 1
+            
+            if remaining > max_remaining:
+                max_remaining = remaining
+                best_pokemon = pokemon
+        
+        if best_pokemon is not None:
+            return best_pokemon, {
+                "heuristic": "forward_checking",
+                "remaining_after": max_remaining,
+                "candidates": len(candidates)
+            }
+        
+        return candidates.sample(1).iloc[0], {"heuristic": "forward_checking", "candidates": len(candidates)}
+    
+    @staticmethod
+    def domain_wipeout(candidates: pd.DataFrame, attributes: list) -> Tuple[pd.Series, Dict]:
+        """
+        Domain Wipeout Prevention:
+        Avoid choices that would eliminate all remaining candidates.
+        """
+        if len(candidates) == 0:
+            return None, {}
+        if len(candidates) == 1:
+            return candidates.iloc[0], {"heuristic": "domain_wipeout", "candidates": 1}
+        
+        # Find pokemon that preserves maximum diversity
+        best_pokemon = None
+        max_diversity = -1
+        
+        sample_size = min(25, len(candidates))
+        sample = candidates.sample(sample_size)
+        
+        for _, pokemon in sample.iterrows():
+            diversity_score = 0
+            
+            for attr in attributes:
+                if attr == 'image_url':
+                    continue
+                
+                value = pokemon[attr]
+                if pd.isna(value):
+                    continue
+                
+                # Count unique values that would remain
+                matching = candidates[candidates[attr] == value]
+                non_matching = candidates[candidates[attr] != value]
+                
+                # Prefer choices that keep both options open
+                diversity_score += min(len(matching), len(non_matching))
+            
+            if diversity_score > max_diversity:
+                max_diversity = diversity_score
+                best_pokemon = pokemon
+        
+        if best_pokemon is not None:
+            return best_pokemon, {
+                "heuristic": "domain_wipeout",
+                "diversity_score": max_diversity,
+                "candidates": len(candidates)
+            }
+        
+
+
