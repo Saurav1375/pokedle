@@ -1,6 +1,6 @@
 # ============================================================
 # FILE: main.py
-# Enhanced FastAPI Application
+# Enhanced FastAPI Application - FIXED COMPARE ENDPOINT
 # ============================================================
 
 from fastapi import FastAPI, HTTPException
@@ -274,16 +274,24 @@ def compare_algorithms(
         if algo.upper() not in AVAILABLE_ALGORITHMS:
             continue
         
-        # Create config for this algorithm
-        config = SolverConfig(
-            algorithm=algo.upper(),
-            attributes=attributes,
-            secret_pokemon=secret_name,
-            max_attempts=max_attempts,
-            heuristic='entropy' if algo.upper() == 'CSP' else 'random'
-        )
-        
         try:
+            # Create config for this algorithm
+            config = SolverConfig(
+                algorithm=algo.upper(),
+                attributes=attributes,
+                secret_pokemon=secret_name,
+                max_attempts=max_attempts,
+                heuristic='entropy' if algo.upper() == 'CSP' else 'random'
+            )
+            
+            # Add algorithm-specific configs with defaults
+            if algo.upper() == 'GA':
+                config.ga_config = GAConfig()
+            elif algo.upper() == 'SA':
+                config.sa_config = SAConfig()
+            elif algo.upper() == 'ASTAR':
+                config.astar_config = AStarConfig()
+            
             result = solve(config)
             results[algo] = {
                 "success": result.success,
