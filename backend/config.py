@@ -3,6 +3,9 @@
 # Configuration and Constants
 # ============================================================
 
+# CSV file path
+CSV_PATH = "03_cleaned_with_images_and_evolutionary_stages.csv"
+
 AVAILABLE_ATTRIBUTES = [
     'Generation', 'Height', 'Weight', 
     'Type1', 'Type2', 'Color', 'evolutionary_stage'
@@ -50,6 +53,15 @@ ALGORITHM_DESCRIPTIONS = {
     "SA": "Simulated Annealing with temperature-based optimization"
 }
 
+CROSSOVER_DESCRIPTIONS = {
+    "attribute_blend": "Blend attributes based on parent fitness",
+    "uniform": "50-50 chance for each attribute from either parent",
+    "single_point": "Single crossover point splits attributes",
+    "two_point": "Two crossover points create three segments",
+    "fitness_weighted": "Higher fitness parent contributes more",
+    "adaptive": "Adapts strategy based on generation"
+}
+
 # GA Configuration
 DEFAULT_GA_CONFIG = {
     'pop_size': 100,
@@ -76,4 +88,3 @@ DEFAULT_ASTAR_CONFIG = {
     'beam_width': 100,
     'heuristic_weight': 1.0
 }
-

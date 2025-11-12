@@ -1,19 +1,16 @@
 # ============================================================
-# FILE: algorithms/simulated_annealing.py
-# Simulated Annealing Algorithm Implementation
+# FILE: algorithms/simulated_annealing.py - FIXED
 # ============================================================
 
 import pandas as pd
-import random
 import math
-from typing import Dict, Tuple, Any
+from typing import Dict, Tuple, Any, List, Set
 from algorithms.base import BaseSolver
+from heuristics.csp_heuristics import CSPHeuristics
+import random
 
 class SimulatedAnnealingSolver(BaseSolver):
-    """
-    Simulated Annealing algorithm for Pokedle.
-    Uses temperature-based acceptance probability to escape local optima.
-    """
+    """Simulated Annealing algorithm for Pokedle"""
     
     def __init__(self, dataframe: pd.DataFrame, attributes: list, config: dict):
         super().__init__(dataframe, attributes)
@@ -29,16 +26,35 @@ class SimulatedAnnealingSolver(BaseSolver):
         self.best_energy = float('inf')
         self.iteration = 0
         self.no_improvement_count = 0
+    
+    def _safe_value_check(self, val1, val2) -> bool:
+        """Safely check if two values are equal"""
+        if val1 is None or val2 is None:
+            return val1 == val2
+        if isinstance(val1, float) and pd.isna(val1):
+            return isinstance(val2, float) and pd.isna(val2)
+        if isinstance(val2, float) and pd.isna(val2):
+            return False
+        return val1 == val2
+    
+    def _get_pokemon_types(self, pokemon) -> set:
+        """Safely get Pokemon types"""
+        types = set()
+        type1 = pokemon.get('Type1') if isinstance(pokemon, pd.Series) else pokemon['Type1']
+        type2 = pokemon.get('Type2') if isinstance(pokemon, pd.Series) else pokemon['Type2']
         
+        if type1 is not None and not (isinstance(type1, float) and pd.isna(type1)):
+            types.add(type1)
+        if type2 is not None and not (isinstance(type2, float) and pd.isna(type2)):
+            types.add(type2)
+        
+        return types
+    
     def energy(self, pokemon_idx: int) -> float:
-        """
-        Calculate energy (lower is better).
-        Based on constraint violations from feedback history.
-        """
+        """Calculate energy (lower is better)"""
         pokemon = self.df.loc[pokemon_idx]
         
         if not self.feedback_history:
-            # Initial energy based on attribute diversity
             return self._diversity_energy(pokemon)
         
         violations = 0
@@ -52,8 +68,11 @@ class SimulatedAnnealingSolver(BaseSolver):
                 if attr == 'image_url':
                     continue
                 
+                pokemon_val = pokemon.get(attr)
+                guess_val = guess.get(attr)
+                
                 if status == 'green':
-                    if pokemon[attr] == guess[attr]:
+                    if self._safe_value_check(pokemon_val, guess_val):
                         satisfied += 1
                     else:
                         violations += 3 * penalty_multiplier
@@ -61,34 +80,44 @@ class SimulatedAnnealingSolver(BaseSolver):
                 
                 elif status == 'gray':
                     if attr in ['Type1', 'Type2']:
-                        pokemon_types = {pokemon['Type1'], pokemon['Type2']}
-                        pokemon_types = {t for t in pokemon_types if not pd.isna(t)}
-                        if guess[attr] in pokemon_types:
-                            violations += 2
+                        pokemon_types = self._get_pokemon_types(pokemon)
+                        if guess_val is not None and not (isinstance(guess_val, float) and pd.isna(guess_val)):
+                            if guess_val in pokemon_types:
+                                violations += 2
                     else:
-                        if pokemon[attr] == guess[attr]:
+                        if self._safe_value_check(pokemon_val, guess_val):
                             violations += 2
                 
                 elif status == 'yellow':
-                    pokemon_types = {pokemon['Type1'], pokemon['Type2']}
-                    pokemon_types = {t for t in pokemon_types if not pd.isna(t)}
-                    if guess[attr] not in pokemon_types:
+                    pokemon_types = self._get_pokemon_types(pokemon)
+                    if guess_val is None or (isinstance(guess_val, float) and pd.isna(guess_val)):
                         violations += 2
-                    elif pokemon[attr] == guess[attr]:
+                    elif guess_val not in pokemon_types:
+                        violations += 2
+                    elif self._safe_value_check(pokemon_val, guess_val):
                         violations += 1
                 
                 elif status == 'higher':
-                    if pokemon[attr] <= guess[attr]:
-                        violations += 2
+                    try:
+                        if pokemon_val is not None and guess_val is not None:
+                            if not (isinstance(pokemon_val, float) and pd.isna(pokemon_val)):
+                                if not (isinstance(guess_val, float) and pd.isna(guess_val)):
+                                    if float(pokemon_val) <= float(guess_val):
+                                        violations += 2
+                    except (ValueError, TypeError):
+                        pass
                 
                 elif status == 'lower':
-                    if pokemon[attr] >= guess[attr]:
-                        violations += 2
+                    try:
+                        if pokemon_val is not None and guess_val is not None:
+                            if not (isinstance(pokemon_val, float) and pd.isna(pokemon_val)):
+                                if not (isinstance(guess_val, float) and pd.isna(guess_val)):
+                                    if float(pokemon_val) >= float(guess_val):
+                                        violations += 2
+                    except (ValueError, TypeError):
+                        pass
         
-        # Lower energy for more satisfied constraints
         base_energy = violations - satisfied
-        
-        # Add diversity bonus to avoid getting stuck
         diversity_penalty = self._diversity_energy(pokemon) * 0.1
         
         return max(0, base_energy + diversity_penalty)
@@ -101,12 +130,11 @@ class SimulatedAnnealingSolver(BaseSolver):
             if attr == 'image_url':
                 continue
             
-            value = pokemon[attr]
-            if pd.isna(value):
+            value = pokemon.get(attr)
+            if value is None or (isinstance(value, float) and pd.isna(value)):
                 energy += 0.5
                 continue
             
-            # Penalize very common values
             count = (self.df[attr] == value).sum()
             ratio = count / len(self.df)
             energy += ratio
@@ -125,20 +153,12 @@ class SimulatedAnnealingSolver(BaseSolver):
         return math.exp(-delta / self.current_temp)
     
     def get_neighbor(self, pokemon_idx: int) -> int:
-        """
-        Generate neighbor solution.
-        Prefer solutions similar to current but with variation.
-        """
+        """Generate neighbor solution"""
         current_pokemon = self.df.loc[pokemon_idx]
         
-        # High temperature: explore more randomly
-        # Low temperature: exploit local neighborhood
         if self.current_temp > self.initial_temp * 0.5:
-            # Exploration: random pokemon
             return self.df.sample(1).index[0]
         else:
-            # Exploitation: similar pokemon
-            # Find pokemon with similar attributes
             candidates = self.df.copy()
             similarity_scores = []
             
@@ -150,18 +170,28 @@ class SimulatedAnnealingSolver(BaseSolver):
                 for attr in self.attributes:
                     if attr == 'image_url':
                         continue
-                    if not pd.isna(row[attr]) and not pd.isna(current_pokemon[attr]):
-                        if row[attr] == current_pokemon[attr]:
-                            similarity += 1
-                        elif attr in ['Height', 'Weight']:
-                            diff = abs(row[attr] - current_pokemon[attr])
+                    
+                    row_val = row.get(attr)
+                    curr_val = current_pokemon.get(attr)
+                    
+                    if row_val is None or (isinstance(row_val, float) and pd.isna(row_val)):
+                        continue
+                    if curr_val is None or (isinstance(curr_val, float) and pd.isna(curr_val)):
+                        continue
+                    
+                    if self._safe_value_check(row_val, curr_val):
+                        similarity += 1
+                    elif attr in ['Height', 'Weight']:
+                        try:
+                            diff = abs(float(row_val) - float(curr_val))
                             max_diff = self.df[attr].max() - self.df[attr].min()
                             if max_diff > 0:
                                 similarity += 1 - (diff / max_diff)
+                        except (ValueError, TypeError):
+                            pass
                 
                 similarity_scores.append((idx, similarity))
             
-            # Select with probability proportional to similarity
             similarity_scores.sort(key=lambda x: x[1], reverse=True)
             top_candidates = similarity_scores[:20]
             
@@ -177,26 +207,20 @@ class SimulatedAnnealingSolver(BaseSolver):
     def next_guess(self) -> Tuple[pd.Series, Dict[str, Any]]:
         """Generate next guess using simulated annealing"""
         
-        # Initialize current solution
         if self.current_solution is None:
             self.current_solution = self.df.sample(1).index[0]
             self.best_solution = self.current_solution
             self.best_energy = self.energy(self.current_solution)
         
-        # Run iterations at current temperature
         for _ in range(self.iterations_per_temp):
-            # Get neighbor
             neighbor = self.get_neighbor(self.current_solution)
             
-            # Calculate energies
             current_energy = self.energy(self.current_solution)
             neighbor_energy = self.energy(neighbor)
             
-            # Accept or reject
             if random.random() < self.acceptance_probability(current_energy, neighbor_energy):
                 self.current_solution = neighbor
                 
-                # Update best solution
                 if neighbor_energy < self.best_energy:
                     self.best_solution = neighbor
                     self.best_energy = neighbor_energy
@@ -206,15 +230,12 @@ class SimulatedAnnealingSolver(BaseSolver):
             
             self.iteration += 1
         
-        # Cool down
         self.current_temp *= self.cooling_rate
         
-        # Reheat if stuck
         if self.no_improvement_count > 100:
             self.current_temp = self.initial_temp * self.reheat_threshold
             self.no_improvement_count = 0
         
-        # Ensure minimum temperature
         if self.current_temp < self.min_temp:
             self.current_temp = self.min_temp
         
@@ -236,11 +257,9 @@ class SimulatedAnnealingSolver(BaseSolver):
         guess_idx = guess.name
         self.add_feedback(guess_idx, feedback)
         
-        # Recalculate energy for current and best solutions
         current_energy = self.energy(self.current_solution)
         best_energy = self.energy(self.best_solution)
         
-        # Reset if feedback changes energy landscape significantly
         if abs(current_energy - self.best_energy) > 10:
             self.current_temp = self.initial_temp * 0.5
             self.no_improvement_count = 0

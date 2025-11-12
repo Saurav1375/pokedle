@@ -6,6 +6,8 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import time
+import pandas as pd
+from typing import List, Optional
 
 # Import configurations and models
 from config import *
@@ -18,6 +20,10 @@ from algorithms.csp_solver import EnhancedPokedleCSP
 from algorithms.ga_solver import EnhancedPokedleGA
 from algorithms.astar_solver import AStarSolver
 from algorithms.simulated_annealing import SimulatedAnnealingSolver
+
+# Import utilities
+from utils.metrics import calculate_metrics
+from utils.validators import validate_config
 
 app = FastAPI(
     title="Enhanced Pokedle Solver API",
@@ -49,15 +55,15 @@ def create_solver(config: SolverConfig):
     
     elif config.algorithm == 'GA':
         ga_config = config.ga_config or GAConfig()
-        return EnhancedPokedleGA(df, config.attributes, ga_config.__dict__)
+        return EnhancedPokedleGA(df, config.attributes, ga_config.dict())
     
     elif config.algorithm == 'ASTAR':
         astar_config = config.astar_config or AStarConfig()
-        return AStarSolver(df, config.attributes, astar_config.__dict__)
+        return AStarSolver(df, config.attributes, astar_config.dict())
     
     elif config.algorithm == 'SA':
         sa_config = config.sa_config or SAConfig()
-        return SimulatedAnnealingSolver(df, config.attributes, sa_config.__dict__)
+        return SimulatedAnnealingSolver(df, config.attributes, sa_config.dict())
     
     else:
         raise ValueError(f"Unknown algorithm: {config.algorithm}")
@@ -98,7 +104,7 @@ def get_pokemon_list():
             "image_url": row.get('image_url', ''),
             "generation": int(row.get('Generation', 0)) if not pd.isna(row.get('Generation')) else None,
             "type1": row.get('Type1'),
-            "type2": row.get('Type2')
+            "type2": row.get('Type2') if not pd.isna(row.get('Type2')) else None
         })
     
     return {
@@ -116,6 +122,7 @@ def get_config():
         "heuristics": AVAILABLE_HEURISTICS,
         "heuristic_descriptions": HEURISTIC_DESCRIPTIONS,
         "crossover_strategies": AVAILABLE_CROSSOVER_STRATEGIES,
+        "crossover_descriptions": CROSSOVER_DESCRIPTIONS,
         "default_configs": {
             "ga": DEFAULT_GA_CONFIG,
             "sa": DEFAULT_SA_CONFIG,
@@ -162,14 +169,12 @@ def solve(config: SolverConfig):
     start_time = time.time()
     
     # Validate configuration
-    if config.algorithm not in AVAILABLE_ALGORITHMS:
-        raise HTTPException(400, f"Invalid algorithm. Choose from: {AVAILABLE_ALGORITHMS}")
-    
-    if not all(attr in AVAILABLE_ATTRIBUTES for attr in config.attributes):
-        raise HTTPException(400, f"Invalid attributes. Available: {AVAILABLE_ATTRIBUTES}")
-    
-    if config.heuristic not in AVAILABLE_HEURISTICS:
-        raise HTTPException(400, f"Invalid heuristic. Choose from: {AVAILABLE_HEURISTICS}")
+    try:
+        validate_config(config.dict())
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(400, str(e))
     
     # Get secret Pokemon
     if config.secret_pokemon:
@@ -230,12 +235,7 @@ def solve(config: SolverConfig):
     execution_time = time.time() - start_time
     
     # Calculate performance metrics
-    metrics = {
-        "avg_time_per_guess": round(execution_time / len(steps), 3) if steps else 0,
-        "total_guesses": len(steps),
-        "success_rate": 1.0 if success else 0.0,
-        "efficiency": round(1.0 / len(steps), 3) if steps else 0
-    }
+    metrics = calculate_metrics(steps, execution_time, success)
     
     return SolverResult(
         secret_name=secret['Original_Name'],
@@ -246,7 +246,7 @@ def solve(config: SolverConfig):
         execution_time=round(execution_time, 3),
         algorithm=config.algorithm,
         heuristic=config.heuristic,
-        performance_metrics=metrics
+        performance_metrics=metrics.to_dict()
     )
 
 @app.post("/compare")
@@ -271,16 +271,16 @@ def compare_algorithms(
     secret_name = secret['Original_Name']
     
     for algo in algorithms:
-        if algo not in AVAILABLE_ALGORITHMS:
+        if algo.upper() not in AVAILABLE_ALGORITHMS:
             continue
         
         # Create config for this algorithm
         config = SolverConfig(
-            algorithm=algo,
+            algorithm=algo.upper(),
             attributes=attributes,
             secret_pokemon=secret_name,
             max_attempts=max_attempts,
-            heuristic='entropy' if algo == 'CSP' else 'random'
+            heuristic='entropy' if algo.upper() == 'CSP' else 'random'
         )
         
         try:
@@ -294,11 +294,19 @@ def compare_algorithms(
         except Exception as e:
             results[algo] = {"error": str(e)}
     
+    # Determine winner
+    winner = None
+    if results:
+        valid_results = [(k, v) for k, v in results.items() if "error" not in v and v.get("success")]
+        if valid_results:
+            winner = min(valid_results, key=lambda x: x[1]["attempts"])[0]
+    
     return {
         "secret_pokemon": secret_name,
         "results": results,
-        "winner": min(
-            [(k, v) for k, v in results.items() if "error" not in v],
-            key=lambda x: x[1]["attempts"]
-        )[0] if results else None
+        "winner": winner
     }
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
