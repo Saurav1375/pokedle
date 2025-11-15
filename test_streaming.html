@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>SSE Debug Test</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 p-6">
+    <div class="max-w-4xl mx-auto space-y-4">
+        <div class="bg-white rounded-lg p-6 border">
+            <h1 class="text-2xl font-bold mb-4">SSE Stream Debug Test</h1>
+            
+            <div class="flex gap-4 mb-4">
+                <button onclick="testSimpleSSE()" 
+                        class="px-6 py-3 bg-blue-600 text-white rounded-lg font-medium">
+                    1. Test Simple SSE
+                </button>
+                
+                <button onclick="testGASolver()" 
+                        class="px-6 py-3 bg-purple-600 text-white rounded-lg font-medium">
+                    2. Test GA Solver
+                </button>
+                
+                <button onclick="clearLog()" 
+                        class="px-6 py-3 bg-gray-600 text-white rounded-lg font-medium">
+                    Clear Log
+                </button>
+            </div>
+            
+            <div class="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded text-sm">
+                <strong>Instructions:</strong><br>
+                1. First click "Test Simple SSE" - you should see "Test 0, Test 1..." messages<br>
+                2. If that works, click "Test GA Solver" - you should see generation updates<br>
+                3. Watch the log below and the browser console (F12)
+            </div>
+        </div>
+        
+        <div id="progress" class="hidden bg-gradient-to-r from-purple-600 to-pink-600 rounded-lg p-6 text-white">
+            <h3 class="text-xl font-bold mb-2">
+                Generation <span id="gen">0</span> - 
+                Best Fitness: <span id="fitness">0</span>
+            </h3>
+            <div class="bg-white/20 rounded-full h-4 mt-2">
+                <div id="bar" class="bg-white h-4 rounded-full transition-all" style="width: 0%"></div>
+            </div>
+        </div>
+        
+        <div class="bg-white rounded-lg border">
+            <div class="bg-gray-100 px-4 py-2 border-b font-bold">Event Log</div>
+            <div id="log" class="p-4 font-mono text-sm h-96 overflow-y-auto"></div>
+        </div>
+        
+        <div id="results"></div>
+    </div>
+
+    <script>
+        let eventCount = 0;
+        
+        function log(msg, type = 'info') {
+            eventCount++;
+            const logDiv = document.getElementById('log');
+            const time = new Date().toLocaleTimeString();
+            const colors = {
+                info: 'text-gray-700',
+                success: 'text-green-600 font-bold',
+                error: 'text-red-600 font-bold',
+                event: 'text-blue-600 font-bold'
+            };
+            logDiv.innerHTML += `<div class="${colors[type]}">[${eventCount}] ${time}: ${msg}</div>`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(`[${type.toUpperCase()}] ${msg}`);
+        }
+        
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+            eventCount = 0;
+        }
+        
+        async function testSimpleSSE() {
+            log('=== Testing Simple SSE ===', 'event');
+            log('Connecting to /test-sse...', 'info');
+            
+            try {
+                const response = await fetch('http://localhost:8000/test-sse');
+                
+                if (!response.ok) {
+                    log(`HTTP Error: ${response.status}`, 'error');
+                    return;
+                }
+                
+                log('Connection established!', 'success');
+                
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                
+                while (true) {
+                    const { done, value } = await reader.read();
+                    
+                    if (done) {
+                        log('Stream ended', 'info');
+                        break;
+                    }
+                    
+                    buffer += decoder.decode(value, { stream: true });
+                    
+                    // Process complete messages
+                    let boundary = buffer.indexOf('\n\n');
+                    while (boundary !== -1) {
+                        const message = buffer.substring(0, boundary);
+                        buffer = buffer.substring(boundary + 2);
+                        
+                        log(`Raw message: ${message}`, 'info');
+                        
+                        // Parse SSE
+                        const lines = message.split('\n');
+                        let eventType = 'message';
+                        let data = '';
+                        
+                        for (const line of lines) {
+                            if (line.startsWith('event: ')) {
+                                eventType = line.substring(7).trim();
+                            } else if (line.startsWith('data: ')) {
+                                data = line.substring(6);
+                            }
+                        }
+                        
+                        if (data) {
+                            try {
+                                const parsed = JSON.parse(data);
+                                log(`Event [${eventType}]: ${JSON.stringify(parsed)}`, 'success');
+                            } catch (e) {
+                                log(`Parse error: ${e.message}`, 'error');
+                            }
+                        }
+                        
+                        boundary = buffer.indexOf('\n\n');
+                    }
+                }
+            } catch (err) {
+                log(`ERROR: ${err.message}`, 'error');
+                log(`Stack: ${err.stack}`, 'error');
+            }
+        }
+        
+        async function testGASolver() {
+            log('=== Testing GA Solver Stream ===', 'event');
+            log('Connecting to /solve/stream...', 'info');
+            
+            const progressDiv = document.getElementById('progress');
+            progressDiv.classList.remove('hidden');
+            
+            try {
+                const payload = {
+                    algorithm: 'GA',
+                    attributes: ['Type1', 'Type2', 'Generation'],
+                    max_attempts: 5,
+                    ga_config: {
+                        generations_per_guess: 10,
+                        pop_size: 50,
+                        elite_size: 10,
+                        mutation_rate: 0.2,
+                        crossover_rate: 0.7,
+                        tournament_size: 3
+                    }
+                };
+                
+                log(`Sending config: ${JSON.stringify(payload, null, 2)}`, 'info');
+                
+                const response = await fetch('http://localhost:8000/solve/stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (!response.ok) {
+                    log(`HTTP Error: ${response.status} ${response.statusText}`, 'error');
+                    const text = await response.text();
+                    log(`Response: ${text}`, 'error');
+                    return;
+                }
+                
+                log('Connection established!', 'success');
+                
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                let messageCount = 0;
+                
+                while (true) {
+                    const { done, value } = await reader.read();
+                    
+                    if (done) {
+                        log(`Stream ended after ${messageCount} messages`, 'info');
+                        break;
+                    }
+                    
+                    const chunk = decoder.decode(value, { stream: true });
+                    log(`Received chunk (${chunk.length} bytes)`, 'info');
+                    buffer += chunk;
+                    
+                    // Process complete messages
+                    let boundary = buffer.indexOf('\n\n');
+                    while (boundary !== -1) {
+                        const message = buffer.substring(0, boundary);
+                        buffer = buffer.substring(boundary + 2);
+                        messageCount++;
+                        
+                        log(`Message ${messageCount}: ${message.substring(0, 100)}...`, 'info');
+                        
+                        // Parse SSE
+                        const lines = message.split('\n');
+                        let eventType = 'message';
+                        let data = '';
+                        
+                        for (const line of lines) {
+                            if (line.startsWith('event: ')) {
+                                eventType = line.substring(7).trim();
+                            } else if (line.startsWith('data: ')) {
+                                data = line.substring(6);
+                            }
+                        }
+                        
+                        if (data) {
+                            try {
+                                const parsed = JSON.parse(data);
+                                handleGAEvent(eventType, parsed);
+                            } catch (e) {
+                                log(`Parse error: ${e.message}`, 'error');
+                                log(`Data was: ${data}`, 'error');
+                            }
+                        }
+                        
+                        boundary = buffer.indexOf('\n\n');
+                    }
+                }
+                
+                progressDiv.classList.add('hidden');
+                
+            } catch (err) {
+                log(`ERROR: ${err.message}`, 'error');
+                log(`Stack: ${err.stack}`, 'error');
+                progressDiv.classList.add('hidden');
+            }
+        }
+        
+        function handleGAEvent(type, data) {
+            log(`Event [${type}]: ${JSON.stringify(data)}`, 'event');
+            
+            switch (type) {
+                case 'test':
+                    log(`Test event received: ${data.message}`, 'success');
+                    break;
+                
+                case 'start':
+                    log(`Secret Pokemon: ${data.secret_name}`, 'success');
+                    break;
+                
+                case 'progress':
+                    document.getElementById('gen').textContent = data.generation;
+                    document.getElementById('fitness').textContent = data.best_fitness;
+                    document.getElementById('bar').style.width = `${data.best_fitness}%`;
+                    log(`Generation ${data.generation}: Best=${data.best_fitness}, Avg=${data.avg_fitness}`, 'success');
+                    break;
+                
+                case 'attempt_start':
+                    log(`Starting attempt ${data.attempt}`, 'info');
+                    break;
+                
+                case 'step':
+                    log(`Guessed: ${data.guess_name} (Fitness: ${data.algorithm_state.best_fitness})`, 'success');
+                    
+                    const resultsDiv = document.getElementById('results');
+                    const div = document.createElement('div');
+                    div.className = 'bg-white border rounded p-4';
+                    div.innerHTML = `
+                        <div class="font-bold text-lg">${data.guess_name}</div>
+                        <div class="text-sm text-gray-600">
+                            Attempt ${data.attempt} | 
+                            Best Fitness: ${data.algorithm_state.best_fitness} | 
+                            Generation: ${data.algorithm_state.generation}
+                        </div>
+                    `;
+                    resultsDiv.appendChild(div);
+                    break;
+                
+                case 'complete':
+                    log(`COMPLETE! Success: ${data.success}, Attempts: ${data.total_attempts}, Time: ${data.execution_time}s`, 'success');
+                    alert(`Solving complete!\n\nSuccess: ${data.success}\nAttempts: ${data.total_attempts}\nTime: ${data.execution_time}s`);
+                    break;
+                
+                case 'error':
+                    log(`ERROR from server: ${data.error}`, 'error');
+                    alert(`Server error: ${data.error}`);
+                    break;
+            }
+        }
+    </script>
+</body>
+</html>

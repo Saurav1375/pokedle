@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import time
 import pandas as pd
-from typing import List, Optional
+from typing import List, Optional, Callable
 
 # Import configurations and models
 from config import *
@@ -19,6 +19,10 @@ from algorithms.simulated_annealing import SimulatedAnnealingSolver
 # Import utilities
 from utils.metrics import calculate_metrics
 from utils.validators import validate_config
+
+from sse_starlette.sse import EventSourceResponse
+import asyncio
+import json
 
 app = FastAPI(
     title="Pokedle Solver API - Logically Correct Version",
@@ -452,6 +456,96 @@ def test_csp_heuristics(
         "best_combination": best_combo,
         "note": "Tests all combinations of variable and value ordering heuristics"
     }
+    
+@app.post("/solve/stream")
+async def solve_stream(config: SolverConfig):
+    """Streaming endpoint with real-time updates SSE FORMAT"""
+    
+    async def event_generator():
+        # Use a regular list instead of asyncio.Queue for synchronous callback
+        progress_events = []
+        
+        def progress_callback(data):
+            # Simply append to list - this works from sync context
+            progress_events.append(data)
+            print(f"[CALLBACK] Progress event added: gen={data.get('generation')}, fitness={data.get('best_fitness')}")
+        
+        try:
+            validate_config(config.dict())
+            
+            # Get secret
+            if config.secret_pokemon:
+                secret = data_loader.get_pokemon_by_name(config.secret_pokemon)
+                if not secret:
+                    yield f"event: error\ndata: {json.dumps({'error': 'Pokemon not found'})}\n\n"
+                    return
+            else:
+                secret = data_loader.get_random_pokemon()
+            
+            # Start event - PROPER SSE FORMAT
+            yield f"event: start\ndata: {json.dumps({'secret_name': secret['Original_Name']})}\n\n"
+            
+            # Create solver
+            df = data_loader.get_dataframe()
+            
+            # Create appropriate solver based on algorithm
+            if config.algorithm == 'GA':
+                ga_config = config.ga_config or GAConfig()
+                solver = GASolver(df, config.attributes, ga_config.dict(), progress_callback)
+            else:
+                # For other algorithms without progress callback support
+                solver = create_solver(config)
+            
+            # Solve
+            start_time = time.time()
+            steps = []
+            success = False
+            
+            for attempt in range(1, config.max_attempts + 1):
+                yield f"event: attempt_start\ndata: {json.dumps({'attempt': attempt})}\n\n"
+                
+                guess, algorithm_state = solver.next_guess()
+                if guess is None:
+                    break
+                
+                # Yield any accumulated progress events
+                if progress_events:
+                    print(f"[STREAM] Yielding {len(progress_events)} progress events")
+                    for progress_data in progress_events:
+                        yield f"event: progress\ndata: {json.dumps(progress_data)}\n\n"
+                    progress_events.clear()  # Clear after yielding
+                
+                feedback = get_feedback(secret, guess, config.attributes, NUMERIC_ATTRIBUTES)
+                
+                step = {
+                    "attempt": attempt,
+                    "guess_name": guess['Original_Name'],
+                    "guess_data": {attr: str(guess.get(attr, 'N/A')) for attr in config.attributes},
+                    "feedback": feedback,
+                    "algorithm_state": algorithm_state,
+                    "image_url": guess.get('image_url', '')
+                }
+                steps.append(step)
+                
+                yield f"event: step\ndata: {json.dumps(step)}\n\n"
+                
+                if is_complete_match(feedback):
+                    success = True
+                    break
+                
+                solver.update_feedback(guess, feedback)
+            
+            execution_time = time.time() - start_time
+            metrics = calculate_metrics(steps, execution_time, success)
+            
+            # PROPER SSE FORMAT for completion
+            yield f"event: complete\ndata: {json.dumps({'success': success, 'total_attempts': len(steps), 'execution_time': round(execution_time, 3), 'performance_metrics': metrics.to_dict()})}\n\n"
+            
+        except Exception as e:
+            yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+    
+    return EventSourceResponse(event_generator())
+
 
 @app.get("/algorithm-theory/{algorithm}")
 def get_algorithm_theory(algorithm: str):

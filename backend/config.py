@@ -58,12 +58,12 @@ ALGORITHM_DESCRIPTIONS = {
 
 # GA Configuration - OPTIMIZED for speed
 DEFAULT_GA_CONFIG = {
-    'pop_size': 50,              # Reduced from 100
-    'elite_size': 10,            # Reduced from 20
-    'mutation_rate': 0.2,        # Increased for more exploration
-    'crossover_rate': 0.7,       # Slightly reduced
-    'tournament_size': 3,        # Reduced from 5
-    'generations_per_guess': 15  # Reduced from 30
+    'pop_size': 50,              # Reduced
+    'elite_size': 10,            # Reduced
+    'mutation_rate': 0.2,
+    'crossover_rate': 0.7,
+    'tournament_size': 3,
+    'generations_per_guess': 10  # KEY FIX: 30 → 10
 }
 
 # SA Configuration

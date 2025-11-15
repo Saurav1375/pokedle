@@ -18,6 +18,7 @@ import {
   GitCompare,
   Info,
 } from "lucide-react";
+import GAVisualization from "./GAVisualization";
 
 // Types
 interface SolverConfig {
@@ -29,6 +30,13 @@ interface SolverConfig {
   ga_config?: GAConfig;
   sa_config?: SAConfig;
   astar_config?: AStarConfig;
+  csp_config?: CSPConfig;
+}
+
+interface CSPConfig {
+  variable_heuristic: string;
+  value_heuristic: string;
+  use_ac3: boolean;
 }
 
 interface GAConfig {
@@ -75,7 +83,8 @@ interface SolverResult {
   steps: SolverStep[];
   execution_time: number;
   algorithm: string;
-  heuristic: string;
+  heuristic?: string;
+  algorithm_config?: Record<string, any>;
   performance_metrics?: Record<string, any>;
 }
 
@@ -94,6 +103,12 @@ export default function PokedleVisualizer() {
     heuristic: "entropy",
     secret_pokemon: null,
     max_attempts: 10,
+  });
+
+  const [cspConfig, setCspConfig] = useState<CSPConfig>({
+    variable_heuristic: "mrv",
+    value_heuristic: "lcv",
+    use_ac3: true,
   });
 
   const [gaConfig, setGaConfig] = useState<GAConfig>({
@@ -131,7 +146,10 @@ export default function PokedleVisualizer() {
   const [algorithmDescriptions, setAlgorithmDescriptions] = useState<
     Record<string, string>
   >({});
-  const [availableHeuristics, setAvailableHeuristics] = useState<
+  const [variableHeuristics, setVariableHeuristics] = useState<
+    Record<string, string>
+  >({});
+  const [valueHeuristics, setValueHeuristics] = useState<
     Record<string, string>
   >({});
   const [availableCrossoverStrategies, setAvailableCrossoverStrategies] =
@@ -151,7 +169,17 @@ export default function PokedleVisualizer() {
         setAvailableAttrs(data.attributes || []);
         setAvailableAlgorithms(data.algorithms || []);
         setAlgorithmDescriptions(data.algorithm_descriptions || {});
-        setAvailableHeuristics(data.heuristic_descriptions || {});
+
+        // Handle new CSP heuristic structure
+        if (data.csp_heuristics) {
+          setVariableHeuristics(
+            data.csp_heuristics.variable_ordering?.descriptions || {}
+          );
+          setValueHeuristics(
+            data.csp_heuristics.value_ordering?.descriptions || {}
+          );
+        }
+
         setAvailableCrossoverStrategies(data.crossover_strategies || {});
       })
       .catch((err) => console.error("Failed to fetch config:", err));
@@ -170,7 +198,9 @@ export default function PokedleVisualizer() {
     try {
       const configToSend: any = { ...config };
 
-      if (config.algorithm === "GA") {
+      if (config.algorithm === "CSP") {
+        configToSend.csp_config = cspConfig;
+      } else if (config.algorithm === "GA") {
         configToSend.ga_config = gaConfig;
       } else if (config.algorithm === "SA") {
         configToSend.sa_config = saConfig;
@@ -296,6 +326,10 @@ export default function PokedleVisualizer() {
     }
   };
 
+  useEffect(() => {
+    console.log(result);
+  }, [result]);
+
   return (
     <div className="flex h-screen bg-gray-50 overflow-hidden">
       {/* Sidebar */}
@@ -352,26 +386,78 @@ export default function PokedleVisualizer() {
 
           {/* CSP Heuristics */}
           {config.algorithm === "CSP" && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                CSP Heuristic
-              </label>
-              <select
-                value={config.heuristic}
-                onChange={(e) =>
-                  setConfig({ ...config, heuristic: e.target.value })
-                }
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                {Object.entries(availableHeuristics).map(([key, desc]) => (
-                  <option key={key} value={key}>
-                    {key.toUpperCase()}
-                  </option>
-                ))}
-              </select>
-              <p className="mt-1 text-xs text-gray-500">
-                {availableHeuristics[config.heuristic]}
-              </p>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Variable Ordering Heuristic
+                </label>
+                <select
+                  value={cspConfig.variable_heuristic}
+                  onChange={(e) =>
+                    setCspConfig({
+                      ...cspConfig,
+                      variable_heuristic: e.target.value,
+                    })
+                  }
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {Object.entries(variableHeuristics).map(([key, desc]) => (
+                    <option key={key} value={key}>
+                      {key.toUpperCase()}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-gray-500">
+                  {variableHeuristics[cspConfig.variable_heuristic]}
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Value Ordering Heuristic
+                </label>
+                <select
+                  value={cspConfig.value_heuristic}
+                  onChange={(e) =>
+                    setCspConfig({
+                      ...cspConfig,
+                      value_heuristic: e.target.value,
+                    })
+                  }
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {Object.entries(valueHeuristics).map(([key, desc]) => (
+                    <option key={key} value={key}>
+                      {key.toUpperCase()}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-gray-500">
+                  {valueHeuristics[cspConfig.value_heuristic]}
+                </p>
+              </div>
+
+              <div>
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={cspConfig.use_ac3}
+                    onChange={(e) =>
+                      setCspConfig({
+                        ...cspConfig,
+                        use_ac3: e.target.checked,
+                      })
+                    }
+                    className="rounded"
+                  />
+                  <span className="text-gray-700">
+                    Use AC-3 Constraint Propagation
+                  </span>
+                </label>
+                <p className="mt-1 ml-6 text-xs text-gray-500">
+                  Automatically reduces domains using arc consistency
+                </p>
+              </div>
             </div>
           )}
 
@@ -435,7 +521,7 @@ export default function PokedleVisualizer() {
                   className="w-full"
                 />
               </div>
-              <div>
+              {/* <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Crossover Strategy
                 </label>
@@ -455,7 +541,7 @@ export default function PokedleVisualizer() {
                     </option>
                   ))}
                 </select>
-              </div>
+              </div> */}
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">
                   Generations/Guess: {gaConfig.generations_per_guess}
@@ -518,6 +604,9 @@ export default function PokedleVisualizer() {
                   }
                   className="w-full"
                 />
+                <p className="mt-1 text-xs text-gray-500">
+                  1.0 = admissible (optimal), &gt;1.0 = faster but not optimal
+                </p>
               </div>
             </div>
           )}
@@ -681,7 +770,7 @@ export default function PokedleVisualizer() {
                   Enhanced Pokedle AI Solver
                 </h1>
                 <p className="text-sm text-gray-500">
-                  Multi-Algorithm Dashboard
+                  Multi-Algorithm Dashboard v5.0
                 </p>
               </div>
             </div>
@@ -840,7 +929,18 @@ export default function PokedleVisualizer() {
                     </div>
                   )}
                 </div>
-
+                {result.algorithm === "GA" &&
+                  result.steps[currentStep]?.algorithm_state
+                    ?.generation_history && (
+                    <div className="col-span-3 mt-6">
+                      <GAVisualization
+                        generationHistory={
+                          result.steps[currentStep].algorithm_state
+                            .generation_history
+                        }
+                      />
+                    </div>
+                  )}
                 {/* Secret Pokemon */}
                 <div className="bg-gradient-to-r from-yellow-50 to-orange-50 rounded-lg border border-yellow-200 p-6">
                   <div className="flex items-center gap-6">
@@ -858,10 +958,30 @@ export default function PokedleVisualizer() {
                       <p className="text-3xl font-bold text-gray-900">
                         {result.secret_name}
                       </p>
+                      {result.algorithm_config && (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {result.algorithm === "CSP" && (
+                            <>
+                              <span className="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded">
+                                Var:{" "}
+                                {result.algorithm_config.variable_heuristic?.toUpperCase()}
+                              </span>
+                              <span className="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded">
+                                Val:{" "}
+                                {result.algorithm_config.value_heuristic?.toUpperCase()}
+                              </span>
+                              {result.algorithm_config.use_ac3 && (
+                                <span className="px-2 py-1 bg-green-100 text-green-700 text-xs rounded">
+                                  AC-3 Enabled
+                                </span>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
-
                 {/* Current Step */}
                 <div className="grid grid-cols-3 gap-6">
                   <div className="col-span-2 bg-white rounded-lg border border-gray-200 p-6">
@@ -1309,15 +1429,15 @@ export default function PokedleVisualizer() {
                     <ul className="space-y-1 text-sm text-gray-700">
                       <li>
                         • <strong>CSP</strong>: Fast and optimal for
-                        well-constrained problems
+                        well-constrained problems with AC-3
                       </li>
                       <li>
                         • <strong>GA</strong>: Good for complex search spaces
                         with population diversity
                       </li>
                       <li>
-                        • <strong>A*</strong>: Guaranteed optimal with good
-                        heuristics
+                        • <strong>A*</strong>: Guaranteed optimal with
+                        admissible heuristic
                       </li>
                       <li>
                         • <strong>SA</strong>: Escapes local optima through

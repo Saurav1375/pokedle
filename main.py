@@ -106,7 +106,7 @@ def get_feedback(secret, guess, attributes, numeric_attrs=['Height', 'Weight']):
     return feedback
 
 # ============ Enhanced CSP Solver ============
-class EnhancedPokedleCSP:
+class CSPSolver:
     def __init__(self, dataframe, attributes, heuristic='random', numeric_attrs=['Height', 'Weight']):
         self.df = dataframe.copy()
         self.attributes = attributes
@@ -300,7 +300,7 @@ class EnhancedPokedleCSP:
             return candidates.sample(1).iloc[0], {"heuristic": "random", "candidates": len(candidates)}
 
 # ============ Enhanced GA Solver ============
-class EnhancedPokedleGA:
+class GASolver:
     def __init__(self, dataframe, attributes, config: GAConfig):
         self.df = dataframe.copy()
         self.attributes = attributes
@@ -612,7 +612,7 @@ def solve(config: SolverConfig):
     
     # CSP Algorithm
     if config.algorithm == 'CSP':
-        solver = EnhancedPokedleCSP(df, config.attributes, config.heuristic)
+        solver = CSPSolver(df, config.attributes, config.heuristic)
         candidates = df
         
         for attempt in range(1, config.max_attempts + 1):
@@ -660,7 +660,7 @@ def solve(config: SolverConfig):
     # GA Algorithm
     else:
         ga_config = config.ga_config or GAConfig()
-        solver = EnhancedPokedleGA(df, config.attributes, ga_config)
+        solver = GASolver(df, config.attributes, ga_config)
         
         for attempt in range(1, config.max_attempts + 1):
             # Evolve population
