@@ -1,8 +1,3 @@
-# ============================================================
-# FILE: config.py
-# Configuration and Constants
-# ============================================================
-
 # CSV file path
 CSV_PATH = "03_cleaned_with_images_and_evolutionary_stages.csv"
 
@@ -15,19 +10,25 @@ NUMERIC_ATTRIBUTES = ['Height', 'Weight']
 
 AVAILABLE_ALGORITHMS = ['CSP', 'GA', 'ASTAR', 'SA']
 
-AVAILABLE_HEURISTICS = [
-    'random',           # Random selection
+# CSP Heuristics - Split into two categories
+VARIABLE_ORDERING_HEURISTICS = [
     'mrv',              # Minimum Remaining Values
-    'lcv',              # Least Constraining Value
-    'entropy',          # Maximum Information Gain
-    'degree',           # Degree heuristic
-    'mac',              # Maintaining Arc Consistency
-    'forward_checking', # Forward checking
-    'domain_wipeout',   # Domain wipeout prevention
+    'degree',           # Degree heuristic (most constrained)
+    'mrv_degree',       # MRV with degree tiebreaker
+    'none',             # No heuristic (first available)
 ]
 
+VALUE_ORDERING_HEURISTICS = [
+    'lcv',              # Least Constraining Value
+    'most_common',      # Most frequently occurring value
+    'none',             # No heuristic (first available)
+]
+
+# Legacy support - for backward compatibility
+AVAILABLE_HEURISTICS = VARIABLE_ORDERING_HEURISTICS
+
 AVAILABLE_CROSSOVER_STRATEGIES = [
-    'attribute_blend',
+    'attribute_blend',  # No longer used - GA now uses proper crossover
     'uniform',
     'single_point',
     'two_point',
@@ -35,42 +36,34 @@ AVAILABLE_CROSSOVER_STRATEGIES = [
     'adaptive'
 ]
 
-HEURISTIC_DESCRIPTIONS = {
-    "random": "Random selection from remaining candidates",
-    "mrv": "Minimum Remaining Values - choose most constrained attribute",
-    "lcv": "Least Constraining Value - minimize future constraint",
-    "entropy": "Maximum information gain - highest uncertainty reduction",
-    "degree": "Choose variable involved in most constraints",
-    "mac": "Maintaining Arc Consistency - propagate constraints",
-    "forward_checking": "Check future variable domains after assignment",
-    "domain_wipeout": "Avoid assignments that cause domain wipeout"
+VARIABLE_HEURISTIC_DESCRIPTIONS = {
+    "mrv": "Minimum Remaining Values - choose attribute with smallest domain (fail-fast)",
+    "degree": "Degree heuristic - choose attribute with most constraints",
+    "mrv_degree": "MRV with degree as tiebreaker - best of both worlds",
+    "none": "No heuristic - choose first available variable"
+}
+
+VALUE_HEURISTIC_DESCRIPTIONS = {
+    "lcv": "Least Constraining Value - choose value that rules out fewest options",
+    "most_common": "Most common value - choose most frequently occurring value in candidates",
+    "none": "No heuristic - choose first available value"
 }
 
 ALGORITHM_DESCRIPTIONS = {
-    "CSP": "Constraint Satisfaction Problem solver with various heuristics",
-    "GA": "Genetic Algorithm with population-based evolution",
-    "ASTAR": "A* Search algorithm with admissible heuristics",
-    "SA": "Simulated Annealing with temperature-based optimization"
+    "CSP": "Constraint Satisfaction Problem solver with AC-3 propagation and dual heuristics",
+    "GA": "Genetic Algorithm with population-based evolution and valid Pokemon crossover",
+    "ASTAR": "A* Search algorithm with admissible heuristic guaranteeing optimal solution",
+    "SA": "Simulated Annealing with temperature-based optimization and energy minimization"
 }
 
-CROSSOVER_DESCRIPTIONS = {
-    "attribute_blend": "Blend attributes based on parent fitness",
-    "uniform": "50-50 chance for each attribute from either parent",
-    "single_point": "Single crossover point splits attributes",
-    "two_point": "Two crossover points create three segments",
-    "fitness_weighted": "Higher fitness parent contributes more",
-    "adaptive": "Adapts strategy based on generation"
-}
-
-# GA Configuration
+# GA Configuration - OPTIMIZED for speed
 DEFAULT_GA_CONFIG = {
-    'pop_size': 100,
-    'elite_size': 20,
-    'mutation_rate': 0.15,
-    'crossover_rate': 0.8,
-    'tournament_size': 7,
-    'crossover_strategy': 'attribute_blend',
-    'generations_per_guess': 30
+    'pop_size': 50,              # Reduced from 100
+    'elite_size': 10,            # Reduced from 20
+    'mutation_rate': 0.2,        # Increased for more exploration
+    'crossover_rate': 0.7,       # Slightly reduced
+    'tournament_size': 3,        # Reduced from 5
+    'generations_per_guess': 15  # Reduced from 30
 }
 
 # SA Configuration
@@ -84,7 +77,13 @@ DEFAULT_SA_CONFIG = {
 
 # A* Configuration
 DEFAULT_ASTAR_CONFIG = {
-    'max_open_set': 1000,
     'beam_width': 100,
-    'heuristic_weight': 1.0
+    'heuristic_weight': 1.0  # 1.0 ensures admissibility
+}
+
+# CSP Configuration
+DEFAULT_CSP_CONFIG = {
+    'variable_heuristic': 'mrv',
+    'value_heuristic': 'lcv',
+    'use_ac3': True
 }

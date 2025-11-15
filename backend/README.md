@@ -1,218 +1,507 @@
-# Enhanced Pokedle Solver
+# Pokedle Solver API v5.0 - Logically Correct Version
 
-A sophisticated AI-powered Pokedle solver featuring multiple search algorithms and heuristics.
+## 🎯 What Changed in v5.0?
 
-## 🚀 Features
+This version fixes **fundamental logical flaws** in the AI algorithm implementations. All algorithms now follow proper theoretical foundations.
 
-### Algorithms
-- **CSP (Constraint Satisfaction Problem)**: Classic constraint-based solving with arc consistency
-- **Genetic Algorithm**: Population-based evolutionary optimization
-- **A* Search**: Informed search with admissible heuristics
-- **Simulated Annealing**: Temperature-based probabilistic optimization
+### Major Improvements
 
-### CSP Heuristics
-- **Random**: Baseline random selection
-- **MRV (Minimum Remaining Values)**: Choose most constrained variable
-- **LCV (Least Constraining Value)**: Minimize future constraints
-- **Entropy**: Maximum information gain
-- **Degree**: Most constrained variable
-- **Forward Checking**: Look-ahead constraint propagation
-- **Domain Wipeout**: Prevent domain elimination
+#### 1. CSP (Constraint Satisfaction Problem)
+**Before:** ❌ Treated Pokemon as variables  
+**Now:** ✅ Properly treats **attributes** as variables with domains
 
-### Genetic Algorithm Features
-- Multiple crossover strategies (attribute blend, uniform, single-point, two-point, fitness-weighted, adaptive)
-- Adaptive mutation rates
-- Elite preservation
-- Tournament selection
-- Diversity maintenance
+**New Features:**
+- ✅ **AC-3 Constraint Propagation** - Automatically reduces domains
+- ✅ **Two-Level Heuristics:**
+  - **Variable Ordering:** Which attribute to constrain next (MRV, Degree, etc.)
+  - **Value Ordering:** Which value to try first (LCV, Most Common, etc.)
+- ✅ Proper constraint modeling from feedback
 
-### A* Features
-- Admissible distance heuristics
-- Beam search optimization
-- Dynamic heuristic weighting
-- Efficient candidate pruning
+#### 2. GA (Genetic Algorithm)
+**Before:** ❌ Created invalid Pokemon through arbitrary attribute combinations  
+**Now:** ✅ All individuals are **valid Pokemon**
 
-### Simulated Annealing Features
-- Adaptive temperature control
-- Automatic reheating
-- Energy-based optimization
-- Neighborhood exploration strategies
+**New Features:**
+- ✅ Crossover finds real Pokemon matching parent attributes
+- ✅ Fitness properly measures constraint satisfaction
+- ✅ Diversity maintenance prevents premature convergence
 
-## 📁 Project Structure
+#### 3. A* Search
+**Before:** ❌ Non-admissible heuristic (could overestimate)  
+**Now:** ✅ **Admissible heuristic** guaranteeing optimal solution
 
-```
-pokedle_solver/
-├── main.py                     # FastAPI application
-├── config.py                   # Configuration constants
-├── models.py                   # Pydantic models
-├── data_loader.py             # Dataset management
-├── feedback.py                 # Feedback calculation
-├── requirements.txt            # Dependencies
-├── algorithms/
-│   ├── __init__.py
-│   ├── base.py                # Abstract solver class
-│   ├── csp_solver.py          # CSP implementation
-│   ├── ga_solver.py           # GA implementation
-│   ├── astar_solver.py        # A* implementation
-│   └── simulated_annealing.py # SA implementation
-├── heuristics/
-│   ├── __init__.py
-│   ├── base.py
-│   ├── csp_heuristics.py      # CSP heuristic functions
-│   └── ga_heuristics.py       # GA-specific heuristics
-└── utils/
-    ├── __init__.py
-    ├── metrics.py             # Performance metrics
-    └── validators.py          # Input validation
+**New Features:**
+- ✅ Heuristic never overestimates remaining cost
+- ✅ Properly tracks search path
+- ✅ Guarantees shortest solution
+
+#### 4. Simulated Annealing
+**Already Correct:** ✅ But improved energy function and constraint handling
+
+---
+
+## 📡 API Endpoints
+
+### Core Endpoints
+
+#### `POST /solve` - Solve Pokedle
+```json
+{
+  "algorithm": "CSP",
+  "attributes": ["Type1", "Type2", "Generation"],
+  "secret_pokemon": "Charizard",  // Optional
+  "max_attempts": 10,
+  "csp_config": {
+    "variable_heuristic": "mrv",
+    "value_heuristic": "lcv",
+    "use_ac3": true
+  }
+}
 ```
 
-## 🛠️ Installation
-
-```bash
-# Clone repository
-git clone <repository-url>
-cd pokedle_solver
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Ensure you have the Pokemon dataset
-# File: 03_cleaned_with_images_and_evolutionary_stages.csv
+**Response:**
+```json
+{
+  "secret_name": "Charizard",
+  "success": true,
+  "total_attempts": 4,
+  "steps": [...],
+  "algorithm_config": {
+    "variable_heuristic": "mrv",
+    "value_heuristic": "lcv",
+    "use_ac3": true
+  }
+}
 ```
 
-## 🎮 Usage
+#### `GET /config` - Get Configuration Options
+Returns all available heuristics, algorithms, and configurations.
 
-### Start the API
-
-```bash
-python main.py
+**Response includes:**
+```json
+{
+  "csp_heuristics": {
+    "variable_ordering": {
+      "options": ["mrv", "degree", "mrv_degree", "none"],
+      "descriptions": {...}
+    },
+    "value_ordering": {
+      "options": ["lcv", "most_common", "none"],
+      "descriptions": {...}
+    }
+  }
+}
 ```
 
-The API will be available at `http://localhost:8000`
+#### `POST /compare` - Compare Algorithms
+```json
+{
+  "algorithms": ["CSP", "GA", "ASTAR", "SA"],
+  "attributes": ["Type1", "Type2", "Generation"],
+  "secret_pokemon": "Pikachu",
+  "max_attempts": 10
+}
+```
 
-### API Documentation
+#### `POST /test/csp-heuristics` - Test CSP Heuristic Combinations
+Tests all combinations of variable and value ordering heuristics.
 
-Visit `http://localhost:8000/docs` for interactive API documentation.
+```json
+{
+  "attributes": ["Type1", "Type2", "Generation"],
+  "max_attempts": 10
+}
+```
 
-### Example Requests
+**Response:**
+```json
+{
+  "results": {
+    "mrv+lcv": {"success": true, "attempts": 3},
+    "mrv+most_common": {"success": true, "attempts": 4},
+    "degree+lcv": {"success": true, "attempts": 5},
+    ...
+  },
+  "best_combination": "mrv+lcv"
+}
+```
 
-#### Basic Solve
+#### `GET /algorithm-theory/{algorithm}` - Get Algorithm Theory
+Returns theoretical background and correctness properties.
+
+---
+
+## 🎓 CSP Configuration
+
+### Variable Ordering Heuristics
+Choose which attribute to constrain next:
+
+| Heuristic | Description | When to Use |
+|-----------|-------------|-------------|
+| `mrv` | Minimum Remaining Values - smallest domain | Default, fail-fast strategy |
+| `degree` | Most constrained attribute | When constraints are complex |
+| `mrv_degree` | MRV with degree tiebreaker | Best of both worlds |
+| `none` | No heuristic | Baseline comparison |
+
+### Value Ordering Heuristics
+Choose which value to try for the selected attribute:
+
+| Heuristic | Description | When to Use |
+|-----------|-------------|-------------|
+| `lcv` | Least Constraining Value | Default, keeps options open |
+| `most_common` | Most frequent value | When exploring likelihood |
+| `none` | No heuristic | Baseline comparison |
+
+### Example Configurations
+
+**Aggressive (Fast Failure):**
+```json
+{
+  "variable_heuristic": "mrv",
+  "value_heuristic": "lcv",
+  "use_ac3": true
+}
+```
+
+**Conservative (Explore Options):**
+```json
+{
+  "variable_heuristic": "degree",
+  "value_heuristic": "most_common",
+  "use_ac3": true
+}
+```
+
+**Balanced:**
+```json
+{
+  "variable_heuristic": "mrv_degree",
+  "value_heuristic": "lcv",
+  "use_ac3": true
+}
+```
+
+---
+
+## 🧬 GA Configuration
+
+```json
+{
+  "pop_size": 100,        // Population size (10-500)
+  "elite_size": 20,       // Best individuals preserved (5-100)
+  "mutation_rate": 0.15,  // Mutation probability (0.0-1.0)
+  "crossover_rate": 0.8,  // Crossover probability (0.0-1.0)
+  "tournament_size": 5,   // Tournament selection size (2-20)
+  "generations_per_guess": 30  // Generations to evolve (1-200)
+}
+```
+
+**Key Point:** All individuals are now **valid Pokemon** - no arbitrary combinations!
+
+---
+
+## 🔍 A* Configuration
+
+```json
+{
+  "beam_width": 100,        // Beam search width (1+)
+  "heuristic_weight": 1.0   // Heuristic weight (1.0 = admissible)
+}
+```
+
+**Key Point:** `heuristic_weight = 1.0` ensures optimality. Values > 1.0 trade optimality for speed (Weighted A*).
+
+---
+
+## 🌡️ SA Configuration
+
+```json
+{
+  "initial_temp": 100.0,        // Starting temperature (> 0)
+  "cooling_rate": 0.95,         // Cooling factor (0-1)
+  "min_temp": 0.01,            // Minimum temperature (> 0)
+  "iterations_per_temp": 50,   // Iterations per temperature (≥ 1)
+  "reheat_threshold": 0.1      // When to reheat (0-1)
+}
+```
+
+---
+
+## 📊 Example Usage
+
+### Python Client
 
 ```python
 import requests
 
-response = requests.post("http://localhost:8000/solve", json={
+# Solve with CSP
+response = requests.post('http://localhost:8000/solve', json={
     "algorithm": "CSP",
-    "attributes": ["Generation", "Type1", "Type2", "Color"],
-    "heuristic": "entropy",
-    "max_attempts": 10
+    "attributes": ["Type1", "Type2", "Generation", "Height"],
+    "secret_pokemon": "Charizard",
+    "max_attempts": 10,
+    "csp_config": {
+        "variable_heuristic": "mrv",
+        "value_heuristic": "lcv",
+        "use_ac3": True
+    }
 })
 
 result = response.json()
-print(f"Solved in {result['total_attempts']} attempts!")
+print(f"Success: {result['success']}")
+print(f"Attempts: {result['total_attempts']}")
+print(f"Time: {result['execution_time']}s")
+
+# View algorithm state at each step
+for step in result['steps']:
+    print(f"\nAttempt {step['attempt']}: {step['guess_name']}")
+    print(f"Remaining candidates: {step['remaining_candidates']}")
+    print(f"Algorithm state: {step['algorithm_state']}")
 ```
 
-#### Compare Algorithms
+### Compare All Algorithms
 
 ```python
-response = requests.post("http://localhost:8000/compare", json={
+response = requests.post('http://localhost:8000/compare', json={
     "algorithms": ["CSP", "GA", "ASTAR", "SA"],
-    "attributes": ["Generation", "Height", "Weight", "Type1"],
-    "max_attempts": 15
+    "attributes": ["Type1", "Type2", "Generation"],
+    "secret_pokemon": "Pikachu",
+    "max_attempts": 10
 })
 
-comparison = response.json()
-print(f"Winner: {comparison['winner']}")
+results = response.json()
+print(f"Winner: {results['winner']}")
+for algo, data in results['results'].items():
+    print(f"{algo}: {data['attempts']} attempts, {data['time']}s")
 ```
 
-#### With Custom Configuration
+### Test CSP Heuristics
 
 ```python
-response = requests.post("http://localhost:8000/solve", json={
-    "algorithm": "GA",
-    "attributes": ["Generation", "Type1", "Type2", "evolutionary_stage"],
-    "heuristic": "random",
-    "max_attempts": 10,
-    "ga_config": {
-        "pop_size": 150,
-        "elite_size": 30,
-        "mutation_rate": 0.2,
-        "crossover_rate": 0.85,
-        "tournament_size": 10,
-        "crossover_strategy": "fitness_weighted",
-        "generations_per_guess": 50
-    }
+response = requests.post('http://localhost:8000/test/csp-heuristics', json={
+    "attributes": ["Type1", "Type2", "Generation"],
+    "max_attempts": 10
 })
+
+results = response.json()
+print(f"Best combination: {results['best_combination']}")
+
+# View all results
+for combo, data in results['results'].items():
+    if 'error' not in data:
+        print(f"{combo}: {data['attempts']} attempts")
 ```
 
-## 📊 Performance Comparison
+### Get Algorithm Theory
 
-| Algorithm | Avg Attempts | Avg Time | Success Rate |
-|-----------|-------------|----------|--------------|
-| CSP (Entropy) | 3-5 | 0.5s | 95% |
-| GA | 4-6 | 1.2s | 92% |
-| A* | 3-4 | 0.8s | 97% |
-| SA | 5-7 | 1.0s | 89% |
+```python
+response = requests.get('http://localhost:8000/algorithm-theory/CSP')
+theory = response.json()
 
-*Results may vary based on configuration and attribute selection*
+print(f"Formulation: {theory['formulation']}")
+print(f"Properties: {theory['properties']}")
+print(f"Correctness: {theory['correctness']}")
+```
 
-## 🔧 Configuration Options
+---
 
-### CSP Configuration
-- `heuristic`: Choice of search heuristic
-- `max_attempts`: Maximum number of guesses
+## 🔬 Verification & Testing
 
-### GA Configuration
-- `pop_size`: Population size (10-500)
-- `elite_size`: Number of elite individuals preserved
-- `mutation_rate`: Probability of mutation (0-1)
-- `crossover_rate`: Probability of crossover (0-1)
-- `tournament_size`: Tournament selection size
-- `crossover_strategy`: Crossover method
-- `generations_per_guess`: Generations to evolve per guess
-
-### A* Configuration
-- `max_open_set`: Maximum size of open set
-- `beam_width`: Beam search width
-- `heuristic_weight`: Weight for heuristic function
-
-### SA Configuration
-- `initial_temp`: Starting temperature
-- `cooling_rate`: Temperature decay rate
-- `min_temp`: Minimum temperature
-- `iterations_per_temp`: Iterations at each temperature
-- `reheat_threshold`: Reheating threshold
-
-## 🧪 Testing
+### Test CSP Correctness
 
 ```bash
-# Run unit tests
-python -m pytest tests/
-
-# Test specific algorithm
-python -m pytest tests/test_algorithms.py::test_csp_solver
+# Test that CSP properly reduces domains with AC-3
+curl -X POST http://localhost:8000/solve \
+  -H "Content-Type: application/json" \
+  -d '{
+    "algorithm": "CSP",
+    "attributes": ["Type1", "Type2"],
+    "secret_pokemon": "Charizard",
+    "max_attempts": 5,
+    "csp_config": {
+      "variable_heuristic": "mrv",
+      "value_heuristic": "lcv",
+      "use_ac3": true
+    }
+  }'
 ```
 
-## 📈 Advanced Features
+Check that:
+- Domain sizes decrease after each guess
+- AC-3 propagates constraints
+- Assignment dictionary grows
 
-### Custom Heuristics
+### Test GA Valid Individuals
 
-You can implement custom heuristics by extending the base heuristic class:
-
-```python
-from heuristics.base import BaseHeuristic
-
-class MyCustomHeuristic(BaseHeuristic):
-    def select(self, candidates, attributes):
-        # Your logic here
-        return selected_pokemon, info_dict
+```bash
+# Verify all guesses are valid Pokemon
+curl -X POST http://localhost:8000/solve \
+  -H "Content-Type: application/json" \
+  -d '{
+    "algorithm": "GA",
+    "attributes": ["Type1", "Type2", "Generation"],
+    "max_attempts": 10,
+    "ga_config": {
+      "pop_size": 50,
+      "generations_per_guess": 20
+    }
+  }'
 ```
 
-### Algorithm Hybridization
+Check that:
+- All `guess_name` values are real Pokemon
+- Fitness scores are based on constraints
+- Population diversity is maintained
 
-Combine multiple algorithms for enhanced performance:
+### Test A* Admissibility
 
-```python
-# Use CSP for initial filtering, then GA for optimization
-# Implementation in algorithms/hybrid.py
+```bash
+# Verify heuristic never overestimates
+curl -X POST http://localhost:8000/solve \
+  -H "Content-Type: application/json" \
+  -d '{
+    "algorithm": "ASTAR",
+    "attributes": ["Type1", "Type2"],
+    "max_attempts": 10,
+    "astar_config": {
+      "heuristic_weight": 1.0
+    }
+  }'
 ```
+
+Check that:
+- `h_cost` decreases with feedback
+- `f_cost` guides search correctly
+- Solution is optimal (minimal attempts)
+
+---
+
+## 📈 Performance Comparison
+
+Expected performance characteristics:
+
+| Algorithm | Attempts | Time | Optimality | Use Case |
+|-----------|----------|------|------------|----------|
+| **CSP (MRV+LCV)** | 3-5 | Fast | High | Systematic solving |
+| **GA** | 5-8 | Medium | Medium | Exploration |
+| **A*** | 3-4 | Medium | **Optimal** | Shortest path |
+| **SA** | 4-7 | Fast | Medium | Quick approximation |
+
+---
+
+## 🐛 Debugging
+
+### Enable Detailed Logging
+
+Each algorithm returns detailed state in `algorithm_state`:
+
+**CSP:**
+```json
+{
+  "algorithm": "CSP",
+  "variable_heuristic": "mrv",
+  "value_heuristic": "lcv",
+  "candidates": 45,
+  "assignment": {"Type1": "Fire"},
+  "domain_sizes": {"Type1": 1, "Type2": 5, "Generation": 3},
+  "selected_variable": "Type2",
+  "selected_value": "Flying"
+}
+```
+
+**GA:**
+```json
+{
+  "algorithm": "GA",
+  "generation": 30,
+  "best_fitness": 85.5,
+  "avg_fitness": 62.3,
+  "population_diversity": 78.5,
+  "hard_constraints": 2,
+  "soft_constraints": 3
+}
+```
+
+**A*:**
+```json
+{
+  "algorithm": "astar",
+  "g_cost": 2,
+  "h_cost": 1.3,
+  "f_cost": 3.3,
+  "open_set_size": 45,
+  "candidates": 67
+}
+```
+
+---
+
+## 🎯 Best Practices
+
+1. **Start with CSP (MRV+LCV)** - Most systematic and reliable
+2. **Use A* for optimality** - Guarantees shortest path
+3. **Try GA for exploration** - Good for diverse search spaces
+4. **Use SA for quick results** - Fast approximation
+
+### Attribute Selection
+- **Start simple:** 2-3 attributes (Type1, Type2, Generation)
+- **Add complexity:** Include Height, Weight for numeric constraints
+- **Full challenge:** All 7 attributes
+
+### Troubleshooting
+
+**CSP finds no solution:**
+- Check if constraints are contradictory
+- Try `use_ac3: false` to debug
+- Review domain sizes in algorithm state
+
+**GA not converging:**
+- Increase `generations_per_guess`
+- Adjust `mutation_rate` (higher = more exploration)
+- Check `population_diversity` metric
+
+**A* too slow:**
+- Reduce `beam_width`
+- Increase `heuristic_weight` (trades optimality for speed)
+
+**SA stuck in local optimum:**
+- Increase `initial_temp`
+- Adjust `cooling_rate` (slower = more exploration)
+- Enable reheating
+
+---
+
+## 📚 References
+
+- CSP: Russell & Norvig, "Artificial Intelligence: A Modern Approach"
+- GA: Goldberg, "Genetic Algorithms in Search, Optimization, and Machine Learning"
+- A*: Hart, Nilsson, Raphael, "A Formal Basis for the Heuristic Determination of Minimum Cost Paths"
+- SA: Kirkpatrick et al., "Optimization by Simulated Annealing"
+
+---
+
+## 🚀 Running the API
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Run server
+python main.py
+
+# Or with uvicorn
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+API will be available at `http://localhost:8000`  
+Interactive docs at `http://localhost:8000/docs`
+
+---
+
+## Version History
+
+- **v5.0**: Logically correct AI algorithms with proper formulations
+- **v4.0**: Multiple algorithms and heuristics (deprecated - had logical flaws)
+- **v3.0**: Enhanced CSP solver
+- **v2.0**: Basic GA implementation
+- **v1.0**: Initial release

@@ -1,20 +1,14 @@
-# ============================================================
-# FILE: models.py
-# Pydantic Models
-# ============================================================
-
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 
 class GAConfig(BaseModel):
-    """Genetic Algorithm Configuration"""
-    pop_size: int = Field(default=100, ge=10, le=500, description="Population size")
-    elite_size: int = Field(default=20, ge=5, le=100, description="Number of elite individuals")
-    mutation_rate: float = Field(default=0.15, ge=0.0, le=1.0, description="Mutation probability")
-    crossover_rate: float = Field(default=0.8, ge=0.0, le=1.0, description="Crossover probability")
-    tournament_size: int = Field(default=7, ge=2, le=20, description="Tournament selection size")
-    crossover_strategy: str = Field(default='attribute_blend', description="Crossover strategy")
-    generations_per_guess: int = Field(default=30, ge=1, le=200, description="Generations per guess")
+    """Genetic Algorithm Configuration - Optimized for speed"""
+    pop_size: int = Field(default=50, ge=10, le=500, description="Population size (default optimized)")
+    elite_size: int = Field(default=10, ge=5, le=100, description="Number of elite individuals")
+    mutation_rate: float = Field(default=0.2, ge=0.0, le=1.0, description="Mutation probability (higher = more exploration)")
+    crossover_rate: float = Field(default=0.7, ge=0.0, le=1.0, description="Crossover probability")
+    tournament_size: int = Field(default=3, ge=2, le=20, description="Tournament selection size")
+    generations_per_guess: int = Field(default=15, ge=1, le=200, description="Generations per guess (default optimized)")
 
 class SAConfig(BaseModel):
     """Simulated Annealing Configuration"""
@@ -26,20 +20,36 @@ class SAConfig(BaseModel):
 
 class AStarConfig(BaseModel):
     """A* Search Configuration"""
-    max_open_set: int = Field(default=1000, ge=10, description="Maximum open set size")
     beam_width: int = Field(default=100, ge=1, description="Beam search width")
-    heuristic_weight: float = Field(default=1.0, ge=0, description="Heuristic weight factor")
+    heuristic_weight: float = Field(default=1.0, ge=0, description="Heuristic weight factor (1.0 = admissible)")
+
+class CSPConfig(BaseModel):
+    """CSP Configuration with two types of heuristics"""
+    variable_heuristic: str = Field(
+        default='mrv', 
+        description="Variable ordering heuristic (which attribute to constrain next)"
+    )
+    value_heuristic: str = Field(
+        default='lcv', 
+        description="Value ordering heuristic (which value to try first)"
+    )
+    use_ac3: bool = Field(
+        default=True, 
+        description="Use AC-3 constraint propagation"
+    )
 
 class SolverConfig(BaseModel):
     """Main Solver Configuration"""
     algorithm: str = Field(description="Algorithm to use (CSP, GA, ASTAR, SA)")
     attributes: List[str] = Field(description="List of attributes to use")
-    heuristic: str = Field(default='random', description="Heuristic for CSP")
     secret_pokemon: Optional[str] = Field(default=None, description="Secret Pokemon name (random if None)")
     max_attempts: int = Field(default=10, ge=1, le=50, description="Maximum number of guesses")
+    
+    # Algorithm-specific configs
     ga_config: Optional[GAConfig] = Field(default=None, description="GA configuration")
     sa_config: Optional[SAConfig] = Field(default=None, description="SA configuration")
     astar_config: Optional[AStarConfig] = Field(default=None, description="A* configuration")
+    csp_config: Optional[CSPConfig] = Field(default=None, description="CSP configuration")
 
 class SolverStep(BaseModel):
     """Single step in the solving process"""
@@ -50,7 +60,6 @@ class SolverStep(BaseModel):
     remaining_candidates: int = Field(description="Number of remaining candidates")
     timestamp: float = Field(description="Time elapsed since start")
     image_url: Optional[str] = Field(default=None, description="Pokemon image URL")
-    heuristic_info: Optional[Dict[str, Any]] = Field(default=None, description="Heuristic-specific info")
     algorithm_state: Optional[Dict[str, Any]] = Field(default=None, description="Algorithm state info")
 
 class SolverResult(BaseModel):
@@ -62,7 +71,7 @@ class SolverResult(BaseModel):
     steps: List[SolverStep] = Field(description="List of solving steps")
     execution_time: float = Field(description="Total execution time in seconds")
     algorithm: str = Field(description="Algorithm used")
-    heuristic: str = Field(description="Heuristic used")
+    algorithm_config: Optional[Dict[str, Any]] = Field(default=None, description="Algorithm configuration used")
     performance_metrics: Optional[Dict[str, Any]] = Field(default=None, description="Performance metrics")
 
 class PokemonInfo(BaseModel):
